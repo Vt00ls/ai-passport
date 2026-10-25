@@ -61,6 +61,10 @@ run_static_checks() {
         tests/test_bsp_audio_recovery.c components/bsp/src/bsp_es8311_sleep_check.c \
         -o "${test_dir}/test_bsp_audio_recovery"
     "${test_dir}/test_bsp_audio_recovery"
+    "${CC:-cc}" -std=c11 -Wall -Wextra -Werror -Imain \
+        tests/test_dashboard_protocol.c main/app_dashboard/dashboard_protocol.c \
+        -o "${test_dir}/test_dashboard_protocol"
+    "${test_dir}/test_dashboard_protocol" protocol/fixtures/status_cases.txt
     for demo in audio low_power ble wifi; do
         "${CC:-cc}" -std=c11 -Wall -Wextra -Werror \
             -ffunction-sections -fdata-sections -Itests/demo_stubs -Imain \
@@ -75,6 +79,8 @@ run_static_checks() {
     PYTHONDONTWRITEBYTECODE=1 python3 tests/test_verify_firmware.py
     PYTHONDONTWRITEBYTECODE=1 python3 tests/test_archive_firmware.py
     PYTHONDONTWRITEBYTECODE=1 python3 tests/test_install_passport_skills.py
+    PYTHONDONTWRITEBYTECODE=1 python3 tests/test_protocol.py
+    PYTHONDONTWRITEBYTECODE=1 python3 tests/test_collector.py
     rm -rf "${test_dir}"
     echo "Host tests: PASS"
 }
