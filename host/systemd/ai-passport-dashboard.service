@@ -16,8 +16,8 @@ Type=simple
 # EDIT these three paths if the checkout or the venv lives elsewhere.
 User=vt
 Group=bluetooth
-WorkingDirectory=/home/vt/ai-passport/host
-ExecStart=/home/vt/.venvs/dashboard/bin/python /home/vt/ai-passport/host/ble_central.py --config /home/vt/ai-passport/host/dashboard.conf
+WorkingDirectory=/home/vt/Dev_space/ai-passport/host
+ExecStart=/home/vt/.venvs/dashboard/bin/python /home/vt/Dev_space/ai-passport/host/ble_central.py --config /home/vt/Dev_space/ai-passport/host/dashboard.conf
 
 Restart=always
 RestartSec=5
