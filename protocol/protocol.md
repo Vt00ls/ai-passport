@@ -51,8 +51,9 @@ Rules:
 | `v` | int | Protocol version, currently `1`. Must be first. | `v=1` |
 | `t` | int | Host wall-clock time at collection, Unix seconds. The heartbeat. | `t=1782530000` |
 | `h` | str | Hostname (sanitized). | `h=dev-forge` |
+| `nc` | int | Online logical CPU cores, 1–1024. Required to make `ld` meaningful. | `nc=4` |
 | `up` | int | Uptime in seconds. | `up=86400` |
-| `ld` | str | 1-minute load average, fixed two decimals. | `ld=0.42` |
+| `ld` | str | 1-minute load average, fixed two decimals. Judge it against `nc`. | `ld=0.42` |
 | `cpu` | int | CPU busy percent, 0–100. | `cpu=7` |
 | `mem` | int | Memory used percent, 0–100. | `mem=38` |
 | `dsk` | int | Root filesystem used percent, 0–100. | `dsk=33` |
@@ -91,6 +92,9 @@ A conforming decoder MUST:
 
 1. Split on `;`; each part MUST contain exactly one `=`.
 2. Reject unknown or duplicated keys; accept only the keys in the table.
+   Because of this rule, adding a key requires updating the decoder and the
+   producer in the same commit. There is no "decoders ignore unknown keys"
+   fallback: rejecting is what keeps a version skew visible instead of silent.
 3. Validate each value against the per-key charset and type above.
 4. Require `v` and `t`; treat any other missing field as "no data", not an error.
 5. Never treat an absent/optional field as a fatal parse error.
@@ -99,10 +103,9 @@ Both reference implementations are checked against the same shared fixture file,
 [`fixtures/status_cases.txt`](fixtures/status_cases.txt), so the host encoder and
 the firmware decoder cannot drift apart unnoticed.
 
-## Versioning
-- `v=1` is frozen as the baseline. Additive changes (new optional keys) are
-  allowed within `v=1` because decoders ignore unknown keys and producers may
-  omit optional keys.
+## Versioning- `v=1` is frozen as the baseline. Because decoders reject unknown keys, adding a
+  key is a coordinated change shipped to both sides in one commit; it is not
+  silently backward compatible.
 - A breaking change (renamed/removed keys, changed wire framing, or a required
-  key added) MUST bump `v` and ship host and firmware in the same commit. The
-  badge rejects a payload whose `v` is greater than what it implements.
+  key added) MUST bump `v`. The badge rejects a payload whose `v` is greater than
+  what it implements.

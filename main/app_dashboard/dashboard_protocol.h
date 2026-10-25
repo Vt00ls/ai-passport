@@ -30,6 +30,7 @@ typedef enum {
     DASHBOARD_FIELD_VERSION = 0,
     DASHBOARD_FIELD_TIME,
     DASHBOARD_FIELD_HOST,
+    DASHBOARD_FIELD_CORES,
     DASHBOARD_FIELD_UPTIME,
     DASHBOARD_FIELD_LOAD,
     DASHBOARD_FIELD_CPU,
@@ -67,6 +68,7 @@ typedef struct {
     uint16_t version;    // v
     uint32_t heartbeat;  // t: host wall-clock seconds at collection
     uint32_t uptime_s;   // up
+    uint16_t cores;      // nc: online logical CPUs, the yardstick for load_x100
     uint16_t load_x100;  // ld, hundredths ("0.42" -> 42)
     uint16_t agents_active;
     int32_t agent_idle_s;  // as; -1 means "never seen"

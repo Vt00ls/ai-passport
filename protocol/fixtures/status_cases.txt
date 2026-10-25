@@ -10,7 +10,7 @@
 # are ignored. Keep this file and protocol/protocol.md in sync.
 
 # --- accepted: full realistic frame ---------------------------------------
-ok|v=1;t=1782530000;h=dev-forge;up=128099;ld=0.42;cpu=7;mem=38;dsk=33;tmp=51;net=eno1,up,10.2.65.61;ag=2;as=5
+ok|v=1;t=1782530000;h=dev-forge;nc=4;up=128099;ld=0.42;cpu=7;mem=38;dsk=33;tmp=51;net=eno1,up,10.2.65.61;ag=2;as=5
 
 # --- accepted: required fields only --------------------------------------
 ok|v=1;t=1782530000
@@ -20,6 +20,8 @@ ok|v=1;t=1782530000;tmp=-5
 ok|v=1;t=1782530000;as=-1
 ok|v=1;t=1782530000;net=wlan0,down,-
 ok|v=1;t=1782530000;h=Ubuntu-Box-Dev
+ok|v=1;t=1782530000;nc=1
+ok|v=1;t=1782530000;nc=1024
 ok|v=1;t=0
 
 # --- accepted: boundary values -------------------------------------------
@@ -56,6 +58,9 @@ err|load-no-decimal|v=1;t=5;ld=1
 err|temp-out-of-range-high|v=1;t=5;tmp=126
 err|temp-out-of-range-low|v=1;t=5;tmp=-41
 err|overflow-uint32|v=1;t=4294967296
+err|cores-zero|v=1;t=5;nc=0
+err|cores-out-of-range|v=1;t=5;nc=1025
+err|cores-not-integer|v=1;t=5;nc=x
 err|net-missing-component|v=1;t=5;net=eno1,up
 err|net-extra-component|v=1;t=5;net=eno1,up,10.0.0.1,x
 err|net-bad-state|v=1;t=5;net=eno1,maybe,10.0.0.1

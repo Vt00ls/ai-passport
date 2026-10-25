@@ -2,6 +2,7 @@ idf_component_register(
     SRCS "main.c"
          "app_dashboard/dashboard_protocol.c"
          "app_dashboard/dashboard_state.c"
+         "app_dashboard/dashboard_health.c"
          "app_dashboard/dashboard_ble.c"
          "app_dashboard/dashboard_format.c"
          "app_dashboard/dashboard_ui.c"

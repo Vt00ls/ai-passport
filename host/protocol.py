@@ -23,6 +23,7 @@ FIELD_ORDER: Tuple[str, ...] = (
     "v",
     "t",
     "h",
+    "nc",
     "up",
     "ld",
     "cpu",
@@ -34,12 +35,13 @@ FIELD_ORDER: Tuple[str, ...] = (
     "as",
 )
 KNOWN_KEYS = frozenset(FIELD_ORDER)
-INT_KEYS = frozenset({"v", "t", "up", "cpu", "mem", "dsk", "tmp", "ag", "as"})
+INT_KEYS = frozenset({"v", "t", "nc", "up", "cpu", "mem", "dsk", "tmp", "ag", "as"})
 REQUIRED_KEYS = frozenset({"v", "t"})
 # Signed range per integer key: (minimum, maximum).
 INT_RANGES = {
     "v": (1, 255),
     "t": (0, 2**32 - 1),
+    "nc": (1, 1024),
     "up": (0, 2**32 - 1),
     "cpu": (0, 100),
     "mem": (0, 100),

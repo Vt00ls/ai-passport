@@ -83,6 +83,11 @@ run_static_checks() {
     PYTHONDONTWRITEBYTECODE=1 python3 tests/test_verify_firmware.py
     PYTHONDONTWRITEBYTECODE=1 python3 tests/test_archive_firmware.py
     PYTHONDONTWRITEBYTECODE=1 python3 tests/test_install_passport_skills.py
+    "${CC:-cc}" -std=c11 -Wall -Wextra -Werror -Imain \
+        tests/test_dashboard_health.c main/app_dashboard/dashboard_health.c \
+        main/app_dashboard/dashboard_protocol.c \
+        -o "${test_dir}/test_dashboard_health"
+    "${test_dir}/test_dashboard_health"
     PYTHONDONTWRITEBYTECODE=1 python3 tests/test_protocol.py
     PYTHONDONTWRITEBYTECODE=1 python3 tests/test_collector.py
     rm -rf "${test_dir}"

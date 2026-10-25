@@ -17,6 +17,7 @@ static const field_entry_t s_fields[] = {
     { "v", 1, DASHBOARD_FIELD_VERSION },
     { "t", 1, DASHBOARD_FIELD_TIME },
     { "h", 1, DASHBOARD_FIELD_HOST },
+    { "nc", 2, DASHBOARD_FIELD_CORES },
     { "up", 2, DASHBOARD_FIELD_UPTIME },
     { "ld", 2, DASHBOARD_FIELD_LOAD },
     { "cpu", 3, DASHBOARD_FIELD_CPU },
@@ -30,7 +31,7 @@ static const field_entry_t s_fields[] = {
 
 #define FIELD_COUNT ((size_t)(sizeof(s_fields) / sizeof(s_fields[0])))
 
-_Static_assert(DASHBOARD_FIELD_COUNT == 12,
+_Static_assert(DASHBOARD_FIELD_COUNT == 13,
                "presence mask is 16 bits; keep the field list and the enum in sync");
 
 // ---------------------------------------------------------------------------
@@ -197,6 +198,12 @@ static bool parse_field(dashboard_status_t *status, dashboard_field_t field,
         return true;
     case DASHBOARD_FIELD_HOST:
         return copy_bounded(status->host, sizeof(status->host), value, length);
+    case DASHBOARD_FIELD_CORES:
+        // 0 would make the load judgement meaningless, so it is rejected.
+        if (!parse_u32(value, length, &unsigned_value)) return false;
+        if (unsigned_value < 1u || unsigned_value > 1024u) return false;
+        status->cores = (uint16_t)unsigned_value;
+        return true;
     case DASHBOARD_FIELD_UPTIME:
         if (!parse_u32(value, length, &unsigned_value)) return false;
         status->uptime_s = unsigned_value;

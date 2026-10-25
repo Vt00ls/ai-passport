@@ -108,7 +108,8 @@ is fixed-size and allocation-free after init.
 | LVGL heap pool | 24 KB (fixed) | `CONFIG_LV_MEM_SIZE_KILOBYTES` |
 | Status snapshot | ~90 B | one `dashboard_status_t`, reused |
 | BLE write buffer | ≤ 200 B | one `dashboard_status_t` copy path |
-| Three screens | ~2–3 KB LVGL objects | labels only, no images |
+| Three screens | ~4 KB LVGL objects | labels, four bars, one chart; no images |
+| Montserrat 36 + 48 | 0 B RAM, +151 KB flash | glyphs render straight from flash |
 | NimBLE host stack | task stack, existing | unchanged from the BLE demo |
 
 Rules for implementation:
@@ -123,81 +124,123 @@ Rules for implementation:
 
 ## Screens
 
-240×320 portrait, inverted color, 30 px corner mask. Keep content inside a
-12 px inset and out of the corners so the mask never clips text.
+The panel exists because a headless machine that freezes gives no other signal. It
+is therefore **status first**: page one answers "is the box OK?" before showing any
+number, and the panel only becomes loud when something is wrong.
 
-Common chrome on every screen:
+240×320 portrait, inverted colour at the panel level (so LVGL colours are the
+colours on screen), 30 px corner mask, 14 px inset.
 
-- Top row: link dot (green/amber/red/grey) + heartbeat age (`12s`, `3m 20s`,
-  `NEVER`) + battery percent from `bsp_battery_soc()` (hidden when `-1`).
-- Bottom row: three page dots, current page filled.
+Typography: Montserrat 14 (captions), 20 (values), 36 (status word), 48 (the one
+big number). The 36/48 faces cost +56 KB and +95 KB of flash and no RAM, because
+glyphs render straight out of flash.
 
-Page 1 — HOST (`up`, `ld`, `cpu`, `mem`, `dsk`, `tmp`):
-
-```text
- dev-forge            87%
- UPTIME
- 1d 11h 34m
- LOAD        CPU
- 0.42        7%
- MEM  [####----] 38%
- DISK [###-----] 33%
- TEMP   51 C
-```
-
-Page 2 — AGENTS (`ag`, `as`):
+### Page 1 — STATUS
 
 ```text
- AGENTS
-   2
- ACTIVE SESSIONS
- last activity
- 5s ago
+ Ubuntu-Box-Dev    87%
+ +----------------------+
+ |         OK           |   status word, 36 px, state colour
+ |         6s           |   heartbeat age, 48 px
+ +----------------------+
+ |||||||||||||||||||||      heartbeat history, 60 slots x 5 s
+ LAST 5 MIN
+ LOAD 10%      MEM 38%
+ [-]           [###--]
+ DISK 33%      TEMP 51%
+ [##-]          [##--]
+ eno1   2 agents
 ```
 
-Page 3 — NETWORK (`net`):
+The heartbeat strip is one bar per 5 s slot. A received frame fills its slot; a
+frame that never arrived leaves a gap. A frozen host therefore leaves a visible
+run of empty slots, which is the same failure that motivated the project.
 
-```text
- NETWORK
- eno1
- ONLINE / OFFLINE
- 10.2.65.61
-```
+Page 2 — DETAIL: uptime, load with the core count (`0.42 / 4`), CPU, memory, disk,
+temperature, and the network line (`eno1 up 10.2.65.61`).
+
+Page 3 — AGENTS: active session count and time since the last agent activity.
 
 Every value that is absent from the last payload renders `--`, never `0`, so a
 missing field cannot be mistaken for a real measurement.
 
-Link states (from `protocol/protocol.md`): `none` shows `NEVER` and `--` for all
-values; `live` draws normally; `stale` dims values and shows an amber dot;
-`lost` replaces values with `--`, draws a red dot, and keeps the age line.
+### States
+
+The badge reports what it observes, never a cause it cannot prove. It cannot
+distinguish "host dead" from "pusher crashed", so it never claims the former.
+
+| State | Card | Meaning | What to do |
+| --- | --- | --- | --- |
+| `OK` | dark, green border | everything within thresholds | nothing |
+| `WARN` | dark, amber border | a threshold is close | watch |
+| `<ITEM>` | red fill, dark text | a metric breached: `DISK 96%`, `MEMORY 93%`, `LOAD 8.40`, `TEMP 88C`, `NETWORK DOWN` | act now |
+| `SILENT` | dark, red border | link is up, frames stopped: the host is the likely cause | walk over |
+| `NO LINK` | dark, border by duration | BLE connection down; ambiguous (badge, pusher or host) | check Bluetooth and the pusher |
+| `NO DATA` | dark, grey border | nothing received since boot | wait, or start the pusher |
+
+`SILENT` is the strong signal: the transport works, so the host is what stopped.
+`NO LINK` is weak: many causes collapse into it, which is why it does not go red
+immediately.
+
+### Alerting
+
+CRIT must take over the screen, and must not cry wolf.
+
+| Rule | Value | Why |
+| --- | --- | --- |
+| CRIT dwell | 10 s | a single spike must not flash red |
+| Recovery debounce | 5 s below threshold | a value hovering on a threshold must not flap |
+| `NO LINK` escalation | grey 0–20 s, amber 20 s–2 min, red after | a reconnect blip is common; two minutes is not a blip |
+| `SILENT` threshold | 60 s without a frame | already long, so no extra dwell |
+| Acknowledgement | OK click | stops the pulse and the repeats, **keeps the colour** until the condition clears |
+| Repeat reminder | every 30 s while unacknowledged | only matters when nobody is looking |
+| Backlight | 3 pulses of 400 ms on/off, then hold | audible alarms get disabled in an office within a week, so v1 is silent |
+
+A new kind of problem re-arms the acknowledgement, so fixing one alert does not
+silence the next.
+
+## Thresholds
+
+| Item | WARN | CRIT |
+| --- | --- | --- |
+| Heartbeat age | > 15 s | > 60 s |
+| Disk used | ≥ 80 % | ≥ 90 % |
+| Memory used | ≥ 80 % | ≥ 90 % |
+| Load / cores | > 1.0 | > 2.0 |
+| Temperature | ≥ 75 °C | ≥ 85 °C |
+| Network | — | interface down or no address |
+
+Load is judged against `nc`, the core count the producer sends, because load 1.0 is
+saturated on two cores and idle on sixteen. Without `nc` the load is not judged at
+all rather than guessed.
 
 ## Key interaction
 
-Three buttons share GPIO0 through a resistor divider; callbacks stay
-non-blocking and enqueue to the existing input task.
+Three buttons share GPIO0 through a resistor divider; callbacks stay non-blocking
+and enqueue to the existing input task.
 
 | Input | Action |
 | --- | --- |
 | UP click | previous page |
 | DOWN click | next page |
-| OK click | force redraw of the current page |
+| OK click | acknowledge the current alert |
 | OK long press (1 s) | toggle backlight between 100 % and 20 % |
 
-Deep sleep is not used in v1: a desk panel that sleeps is not a status panel.
-The wake-from-sleep key guard in `main/key_guard.h` stays untouched because the
-switch preserves the existing boot path.
+Deep sleep is not used in v1: a desk panel that sleeps is not a status panel. The
+wake-from-sleep key guard in `main/key_guard.h` stays untouched.
 
 ## Failure states
 
 | Condition | Behaviour |
 | --- | --- |
 | Display/LVGL init fails | log pins and return, as `app_main` does today |
-| NimBLE init fails | UI still renders, link dot grey, `BLE FAILED` line |
-| Never receives a status | `NEVER`, all values `--`, grey dot |
+| NimBLE init fails | UI still renders; card shows `NO LINK` once the grace period passes |
+| Never receives a status | `NO DATA` + `NEVER`, all values `--` |
 | Malformed payload | frame rejected, previous values retained, age keeps growing |
-| Unsupported protocol version | frame rejected; link dot red to flag a version skew |
+| Unsupported version or unknown key | frame rejected; the panel goes `SILENT`, which exposes the version skew |
+| A metric field is missing | that indicator reads `--` and never raises an alert |
 | Battery gauge absent | battery percent hidden, no placeholder |
-| Button init fails | UI renders and refreshes; only page switching is lost |
+| Button init fails | UI renders and refreshes; alerts still escalate, but cannot be acknowledged |
 
 ## Verification
 
@@ -207,9 +250,11 @@ Host (runs anywhere):
 ./tools/validate.sh --static
 ```
 
-This covers `check_repo.py`, the existing BSP/demo host tests, and the new
-`tests/test_dashboard_protocol.c` plus the Python producer tests, all replayed
-against `protocol/fixtures/status_cases.txt`.
+This covers `check_repo.py`, the existing BSP/demo host tests,
+`tests/test_dashboard_format.c`, `tests/test_dashboard_protocol.c` (replayed
+against `protocol/fixtures/status_cases.txt`), `tests/test_dashboard_health.c`
+(thresholds, dwell, escalation ladder, acknowledgement, reboot detection), and the
+Python producer tests.
 
 Device (needs the badge, ESP-IDF 5.5.3, and an explicit flashing approval):
 

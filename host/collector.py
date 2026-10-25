@@ -67,6 +67,23 @@ def _first_number(path: str) -> float | None:
         return None
 
 
+def read_cores() -> int | None:
+    """Online logical CPU cores.
+
+    Load average is only meaningful relative to this number, so the badge cannot
+    judge LOAD without it. Uses the CPUs this process may run on when the kernel
+    reports an affinity mask, which is the set the load average reflects for us.
+    """
+    try:
+        affinity = os.sched_getaffinity(0)
+        if affinity:
+            return len(affinity)
+    except (AttributeError, OSError):
+        pass
+    count = os.cpu_count()
+    return count if count else None
+
+
 def read_uptime(proc_uptime: str) -> int | None:
     value = _first_number(proc_uptime)
     return None if value is None else int(value)
@@ -370,6 +387,10 @@ def collect(sources: Sources | None = None) -> str:
     hostname = socket.gethostname()
     if hostname:
         fields["h"] = hostname
+
+    cores = read_cores()
+    if cores:
+        fields["nc"] = cores
 
     uptime = read_uptime(src.proc_uptime)
     if uptime is not None:
