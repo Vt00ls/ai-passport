@@ -62,6 +62,10 @@ run_static_checks() {
         -o "${test_dir}/test_bsp_audio_recovery"
     "${test_dir}/test_bsp_audio_recovery"
     "${CC:-cc}" -std=c11 -Wall -Wextra -Werror -Imain \
+        tests/test_dashboard_format.c main/app_dashboard/dashboard_format.c \
+        -o "${test_dir}/test_dashboard_format"
+    "${test_dir}/test_dashboard_format"
+    "${CC:-cc}" -std=c11 -Wall -Wextra -Werror -Imain \
         tests/test_dashboard_protocol.c main/app_dashboard/dashboard_protocol.c \
         -o "${test_dir}/test_dashboard_protocol"
     "${test_dir}/test_dashboard_protocol" protocol/fixtures/status_cases.txt

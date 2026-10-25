@@ -220,3 +220,41 @@ Device (needs the badge, ESP-IDF 5.5.3, and an explicit flashing approval):
 5. Restart the host: the link recovers and the age resets.
 6. Power-cycle the badge: it re-advertises and the host reconnects.
 7. Log the free-heap numbers from the RAM budget section.
+
+## Bring-up checklist (first flash)
+
+Prerequisites: ESP-IDF 5.5.3 activated, the badge connected with a data-capable USB
+cable, and explicit approval to flash.
+
+```bash
+source ~/esp/esp-idf/export.sh
+./tools/validate.sh --firmware
+idf.py -p /dev/cu.usbmodem* flash monitor
+```
+
+`GPIO0` is the boot strapping pin and is shared by the three buttons. Do not hold
+UP, DOWN, or OK while the board resets or flashes: a low level during reset can put
+the chip into download mode instead of running the application.
+
+Read the boot log for these four things before looking at the screen:
+
+1. No panic or reboot loop.
+2. `dash_ble: advertising as PassportDash`.
+3. On connect: `dash_ble: connected; ATT MTU <n> (need >= 203)`. A warning here means
+   the frame needs a different transport, not another retry.
+4. `dash_app: [boot]` and `dash_app: [ui started]` free-heap and largest-block
+   numbers. Compare them against the RAM budget table; the measured values win.
+
+Then confirm the product boot path: the dashboard must appear, and the baseline
+demo menu must not.
+
+```bash
+~/.venvs/dashboard/bin/python host/ble_central.py --verbose
+```
+
+Finally, the two behavioural checks:
+
+- **A3:** stop the pusher (`Ctrl-C`) and watch the values turn into `--` while the
+  age keeps counting.
+- **A4:** leave the host idle for a few minutes, then power-cycle the badge: it must
+  re-advertise, the pusher must reconnect on its own, and the age must reset.

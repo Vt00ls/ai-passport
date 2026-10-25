@@ -205,3 +205,37 @@ v1 不使用深睡：会睡觉的面板不是状态面板。`main/key_guard.h` �
 5. 重启主机：链路恢复，距今归零。
 6. 给工牌断电重启：重新广播，主机重连成功。
 7. 记录 RAM 预算章节要求的空闲堆数字。
+
+## 上板清单（首次烧录）
+
+前置条件：已激活 ESP-IDF 5.5.3、工牌用支持数据传输的 USB 线连接、且已获得烧录授权。
+
+```bash
+source ~/esp/esp-idf/export.sh
+./tools/validate.sh --firmware
+idf.py -p /dev/cu.usbmodem* flash monitor
+```
+
+`GPIO0` 是启动 strapping 脚，且被三个按键共用。板子复位或烧录时不要按住 UP、DOWN
+或 OK：复位期间该脚为低可能让芯片进入下载模式而不运行应用。
+
+先看启动日志里的四件事，再看屏幕：
+
+1. 没有 panic 或重启循环。
+2. `dash_ble: advertising as PassportDash`。
+3. 连接时：`dash_ble: connected; ATT MTU <n> (need >= 203)`。这里出现告警意味着状态串
+   需要换一种传输方式，而不是重试。
+4. `dash_app: [boot]` 与 `dash_app: [ui started]` 的空闲堆与最大连续块数字，与 RAM
+   预算表对照；以实测值为准。
+
+然后确认产品启动路径：必须出现仪表盘，不得出现基线 demo 菜单。
+
+```bash
+~/.venvs/dashboard/bin/python host/ble_central.py --verbose
+```
+
+最后是两条行为检查：
+
+- **A3：** 停掉推送端（`Ctrl-C`），观察数值变为 `--` 而“距今”继续增长。
+- **A4：** 让主机空闲数分钟，再给工牌断电重启：工牌应重新广播、推送端应自行重连、
+  “距今”应归零。
