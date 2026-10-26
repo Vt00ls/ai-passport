@@ -1,0 +1,77 @@
+# Shared protocol conformance cases for BOTH reference implementations:
+#   host/protocol.py            (Python, producer side)
+#   main/app_dashboard/dashboard_protocol.c   (C, firmware decoder)
+#
+# Format, one case per line:
+#   ok|<payload>              payload MUST be accepted
+#   err|<reason>|<payload>    payload MUST be rejected; <reason> is documentation
+#
+# <payload> must contain no spaces, tabs, or '|'. Blank lines and '#' comments
+# are ignored. Keep this file and protocol/protocol.md in sync.
+
+# --- accepted: full realistic frame ---------------------------------------
+ok|v=1;t=1782530000;h=dev-forge;nc=4;up=128099;ld=0.42;cpu=7;mem=38;dsk=33;tmp=51;net=eno1,up,10.2.65.61;ag=2;as=5
+
+# --- accepted: required fields only --------------------------------------
+ok|v=1;t=1782530000
+
+# --- accepted: single optional field -------------------------------------
+ok|v=1;t=1782530000;tmp=-5
+ok|v=1;t=1782530000;as=-1
+ok|v=1;t=1782530000;net=wlan0,down,-
+ok|v=1;t=1782530000;h=Ubuntu-Box-Dev
+ok|v=1;t=1782530000;nc=1
+ok|v=1;t=1782530000;nc=1024
+ok|v=1;t=0
+
+# --- accepted: boundary values -------------------------------------------
+ok|v=1;t=4294967295;up=4294967295
+ok|v=1;t=5;cpu=0;mem=100;dsk=100
+ok|v=1;t=5;tmp=125;as=2147483647
+ok|v=1;t=5;ld=0.00
+ok|v=1;t=5;tmp=-40
+
+# --- rejected: framing and framing-level syntax --------------------------
+err|empty|
+err|trailing-semicolon|v=1;t=5;
+err|segment-without-equals|v=1;t=5;nokey
+err|two-equals-in-segment|v=1;t=5;h=a=b
+err|leading-comma-only|,
+
+# --- rejected: required fields -------------------------------------------
+err|missing-t|v=1
+err|missing-v|t=5
+
+# --- rejected: key discipline --------------------------------------------
+err|unknown-key|v=1;t=5;foo=bar
+err|duplicate-key|v=1;t=5;t=6
+err|duplicate-optional-key|v=1;t=5;cpu=1;cpu=2
+
+# --- rejected: value types ----------------------------------------------
+err|cpu-not-integer|v=1;t=5;cpu=12.5
+err|cpu-out-of-range|v=1;t=5;cpu=101
+err|mem-out-of-range|v=1;t=5;mem=200
+err|negative-uptime|v=1;t=5;up=-1
+err|load-one-decimal|v=1;t=5;ld=0.5
+err|load-three-decimals|v=1;t=5;ld=0.123
+err|load-no-decimal|v=1;t=5;ld=1
+err|temp-out-of-range-high|v=1;t=5;tmp=126
+err|temp-out-of-range-low|v=1;t=5;tmp=-41
+err|overflow-uint32|v=1;t=4294967296
+err|cores-zero|v=1;t=5;nc=0
+err|cores-out-of-range|v=1;t=5;nc=1025
+err|cores-not-integer|v=1;t=5;nc=x
+err|net-missing-component|v=1;t=5;net=eno1,up
+err|net-extra-component|v=1;t=5;net=eno1,up,10.0.0.1,x
+err|net-bad-state|v=1;t=5;net=eno1,maybe,10.0.0.1
+
+# --- rejected: version gate ---------------------------------------------
+err|version-too-new|v=2;t=5
+err|version-zero|v=0;t=5
+err|version-not-integer|v=x;t=5
+
+# --- rejected: illegal characters ---------------------------------------
+err|space-in-value|v=1;t=5;h=dev forge
+err|equals-in-value|v=1;t=5;h=a=b
+err|semicolon-via-empty-key|v=1;t=5;;cpu=1
+err|empty-value|v=1;t=5;h=

@@ -14,6 +14,7 @@
 #include "demo_navigation.h"
 #include "key_guard.h"
 #include "ui_pixel.h"
+#include "app_dashboard/dashboard_app.h"
 #include "lvgl.h"
 #include "esp_log.h"
 #include "esp_sleep.h"
@@ -23,6 +24,18 @@
 #include "freertos/task.h"
 
 static const char *TAG = "main";
+
+// Product boot path. The node-monitor dashboard is this firmware's UI; the
+// baseline demo menu (DEMOS[] below) stays in the tree as the upstream hardware
+// reference and is reachable only by changing this switch and rebuilding.
+// Kept as a function instead of `if (0)` so both branches stay compiled, keeping
+// the reference path buildable and free of unused-function regressions.
+#define APP_BOOT_DEMO_MENU 0
+
+static bool boot_demo_menu(void)
+{
+    return APP_BOOT_DEMO_MENU != 0;
+}
 
 static const demo_entry_t DEMOS[] = {
     { .name = "Display", .enter = demo_display_enter, .exit = demo_display_exit,
@@ -104,6 +117,12 @@ static demo_nav_input_t navigation_input(bsp_btn_t btn, bsp_btn_ev_t event) {
 }
 
 static void process_input(const input_event_t *input) {
+    if (!boot_demo_menu()) {
+        // The dashboard owns every key in the product build.
+        dashboard_app_key(input->btn, input->event);
+        return;
+    }
+
     demo_nav_input_t nav_input = navigation_input(input->btn, input->event);
 
     if (s_navigation.active >= 0) {
@@ -215,7 +234,7 @@ static void on_key(bsp_btn_t btn, bsp_btn_ev_t ev, void *user) {
 }
 
 void app_main(void) {
-    ESP_LOGI(TAG, "FoloToy AI Passport BSP demo 启动");
+    ESP_LOGI(TAG, "FoloToy AI Passport 启动");
     const uint32_t wake_causes = esp_sleep_get_wakeup_causes();
     if (wake_causes & ~(1u << ESP_SLEEP_WAKEUP_UNDEFINED)) {
         ESP_LOGI(TAG, "休眠唤醒原因位图: 0x%02x", (unsigned)wake_causes);
@@ -267,6 +286,16 @@ void app_main(void) {
     s_ok[4] = true;                                    // 页面内按需初始化并显示错误
     s_ok[5] = true;
     s_ok[6] = true;
+
+    if (!boot_demo_menu()) {
+        // Product boot path: the node-monitor dashboard.
+        const esp_err_t err = dashboard_app_start();
+        if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+            ESP_LOGE(TAG, "仪表盘启动不完整: %s", esp_err_to_name(err));
+        }
+        s_input_ready = true;
+        return;
+    }
 
     if (bsp_lvgl_lock(1000)) {
         enter_menu();

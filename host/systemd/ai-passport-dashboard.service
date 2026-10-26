@@ -1,0 +1,43 @@
+[Unit]
+Description=AI Passport node dashboard BLE pusher
+Documentation=https://github.com/Vt00ls/ai-passport/blob/feature/dashboard/host/README.md
+# BlueZ owns the adapter; every GATT operation goes through it.
+After=bluetooth.service network-online.target
+Requires=bluetooth.service
+Wants=network-online.target
+# Restart limits live in [Unit], not [Service] (systemd >= 229).
+StartLimitIntervalSec=300
+StartLimitBurst=20
+
+[Service]
+Type=simple
+# Runs as the user that owns the pi/paseo agent sessions, so the collector reads the
+# same ~/.pi/agent/sessions tree it would read interactively.
+# EDIT these three paths if the checkout or the venv lives elsewhere.
+User=vt
+Group=bluetooth
+WorkingDirectory=/home/vt/Dev_space/ai-passport/host
+ExecStart=/home/vt/.venvs/dashboard/bin/python /home/vt/Dev_space/ai-passport/host/ble_central.py --config /home/vt/Dev_space/ai-passport/host/dashboard.conf
+
+Restart=always
+RestartSec=5
+# A badge that is switched off is a normal condition: ble_central.py retries
+# internally with backoff and does not exit, so this only fires on real faults.
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONUNBUFFERED=1
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ai-passport-dashboard
+
+# The pusher needs the system D-Bus socket, the session log tree, and BlueZ.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target
