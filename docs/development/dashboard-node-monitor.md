@@ -188,6 +188,7 @@ distinguish "host dead" from "pusher crashed", so it never claims the former.
 | `SILENT` | dark, red border | link is up, frames stopped: the host is the likely cause | walk over |
 | `NO LINK` | dark, border by duration | BLE connection down; ambiguous (badge, pusher or host) | check Bluetooth and the pusher |
 | `NO DATA` | dark, grey border | nothing received since boot | wait, or start the pusher |
+| `LOW BATT` | red fill, dark text | the badge itself is about to die | plug it in |
 
 `SILENT` is the strong signal: the transport works, so the host is what stopped.
 `NO LINK` is weak: many causes collapse into it, which is why it does not go red
@@ -209,6 +210,22 @@ CRIT must take over the screen, and must not cry wolf.
 
 A new kind of problem re-arms the acknowledgement, so fixing one alert does not
 silence the next.
+
+### The badge's own battery
+
+A panel that dies silently is worse than one that nags, so the badge watches its own
+CW2017 gauge, independently of the host link:
+
+| Level | Threshold | Presentation |
+| --- | --- | --- |
+| WARN | ≤ 20 % | battery text turns amber; no takeover |
+| CRIT | ≤ 10 % (after 30 s) | `LOW BATT` takes the card over, backlight pulse |
+| Clear | ≥ 15 % | hysteresis, so a rebounding reading cannot flap the screen |
+
+`LOW BATT` deliberately outranks host alerts: it is the one alarm the user can fix
+in two seconds, and letting the panel die would hide every later alert. A rising
+reading is treated as charging, which suppresses the alert for two minutes, so the
+panel does not nag while it refills.
 
 ## Thresholds
 

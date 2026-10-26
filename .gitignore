@@ -15,3 +15,6 @@ managed_components/
 # Python bytecode from running host/ scripts in place.
 __pycache__/
 *.pyc
+
+# Rendered images and cached host objects from tools/ui_preview.
+/tools/ui_preview/build/

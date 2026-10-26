@@ -34,7 +34,7 @@ _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 if _THIS_DIR not in sys.path:
     sys.path.insert(0, _THIS_DIR)
 
-from protocol import MAX_BYTES, PROTOCOL_VERSION, encode  # noqa: E402
+from protocol import HOST_MAX, MAX_BYTES, PROTOCOL_VERSION, encode  # noqa: E402
 
 
 @dataclass
@@ -65,6 +65,18 @@ def _first_number(path: str) -> float | None:
         return float(Path(path).read_text(encoding="utf-8", errors="replace").split()[0])
     except (OSError, ValueError, IndexError):
         return None
+
+
+def short_hostname(raw: str) -> str:
+    """First DNS label of the hostname, capped at the protocol's host limit.
+
+    Some systems report a fully qualified name (this Mac returns a 36-character one),
+    and the badge rejects any field that does not fit its buffers. Emitting the long
+    form would make every frame invalid, and the panel would sit at SILENT forever,
+    so the name is reduced here instead of being rejected downstream.
+    """
+    label = raw.split(".")[0] if raw else ""
+    return label[:HOST_MAX]
 
 
 def read_cores() -> int | None:
@@ -384,7 +396,7 @@ def collect(sources: Sources | None = None) -> str:
     now = src.now if src.now is not None else time.time()
 
     fields: dict[str, object] = {"v": PROTOCOL_VERSION, "t": int(now)}
-    hostname = socket.gethostname()
+    hostname = short_hostname(socket.gethostname())
     if hostname:
         fields["h"] = hostname
 

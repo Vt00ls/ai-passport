@@ -28,6 +28,11 @@ dashboard_health_config_t dashboard_health_default_config(void)
     config.load_crit_pct = 200;
     config.temp_warn_c = 75;
     config.temp_crit_c = 85;
+    config.battery_warn_pct = 20;
+    config.battery_crit_pct = 10;
+    config.battery_recover_margin_pct = 5;
+    config.battery_crit_dwell_ms = 30000;
+    config.battery_charge_suppress_ms = 120000;
     config.crit_dwell_ms = 10000;
     config.recover_ms = 5000;
     return config;
@@ -52,7 +57,8 @@ static dashboard_severity_t classify_percent(uint16_t value, uint8_t warn, uint8
 
 // Apply the dwell / debounce rules for one threshold-based item.
 static void apply_timing(dashboard_item_state_t *state, dashboard_severity_t target,
-                         const dashboard_health_config_t *config, uint64_t now_ms)
+                         const dashboard_health_config_t *config, uint64_t now_ms,
+                         uint32_t crit_dwell_ms)
 {
     // Recovery: hold the higher severity until the condition has been clear for a
     // while, so a value hovering on a threshold cannot flap the screen.
@@ -90,7 +96,7 @@ static void apply_timing(dashboard_item_state_t *state, dashboard_severity_t tar
         state->crit_pending = true;
         state->crit_since_ms = now_ms;
     }
-    if (now_ms - state->crit_since_ms >= config->crit_dwell_ms) {
+    if (now_ms - state->crit_since_ms >= crit_dwell_ms) {
         state->severity = DASHBOARD_SEVERITY_CRIT;
         state->crit_pending = false;
     } else if (state->severity == DASHBOARD_SEVERITY_OK) {
@@ -201,7 +207,7 @@ dashboard_verdict_t dashboard_health_update(dashboard_health_t *health,
         }
         apply_timing(state, classify_percent(percent_items[i].value, percent_items[i].warn,
                                              percent_items[i].crit),
-                     config, now_ms);
+                     config, now_ms, config->crit_dwell_ms);
         if (state->severity > worst_severity) {
             worst = percent_items[i].alert;
             worst_severity = state->severity;
@@ -223,7 +229,7 @@ dashboard_verdict_t dashboard_health_update(dashboard_health_t *health,
             } else if (load_pct > config->load_warn_pct) {
                 target = DASHBOARD_SEVERITY_WARN;
             }
-            apply_timing(state, target, config, now_ms);
+            apply_timing(state, target, config, now_ms, config->crit_dwell_ms);
             if (state->severity > worst_severity) {
                 worst = DASHBOARD_ALERT_LOAD;
                 worst_severity = state->severity;
@@ -243,7 +249,7 @@ dashboard_verdict_t dashboard_health_update(dashboard_health_t *health,
             } else if (celsius >= config->temp_warn_c) {
                 target = DASHBOARD_SEVERITY_WARN;
             }
-            apply_timing(state, target, config, now_ms);
+            apply_timing(state, target, config, now_ms, config->crit_dwell_ms);
             if (state->severity > worst_severity) {
                 worst = DASHBOARD_ALERT_TEMP;
                 worst_severity = state->severity;
@@ -258,7 +264,7 @@ dashboard_verdict_t dashboard_health_update(dashboard_health_t *health,
         } else {
             const dashboard_severity_t target =
                 status->net_up ? DASHBOARD_SEVERITY_OK : DASHBOARD_SEVERITY_CRIT;
-            apply_timing(state, target, config, now_ms);
+            apply_timing(state, target, config, now_ms, config->crit_dwell_ms);
             if (state->severity > worst_severity) {
                 worst = DASHBOARD_ALERT_NET;
                 worst_severity = state->severity;
@@ -270,6 +276,43 @@ dashboard_verdict_t dashboard_health_update(dashboard_health_t *health,
     // reported disk percentage is history, not news.
     if (worst == DASHBOARD_ALERT_NO_LINK || worst == DASHBOARD_ALERT_SILENT) {
         worst_severity = health->items[worst].severity;
+    }
+
+    // --- the badge's own battery -------------------------------------------
+    // It outranks host problems once it reaches CRIT: the panel is about to die, and
+    // this is the one alert the user can fix in two seconds. A WARN does not
+    // outrank a host CRIT.
+    if (health->battery_known) {
+        dashboard_item_state_t *state = &health->items[DASHBOARD_ALERT_BATTERY];
+        if (now_ms < health->charge_suppress_until_ms) {
+            state->severity = DASHBOARD_SEVERITY_OK;
+            state->crit_pending = false;
+            state->below_pending = false;
+        } else {
+            const int soc = health->last_battery_soc;
+            dashboard_severity_t target;
+            if (soc <= (int)config->battery_crit_pct) {
+                target = DASHBOARD_SEVERITY_CRIT;
+            } else if (soc <= (int)config->battery_warn_pct) {
+                target = DASHBOARD_SEVERITY_WARN;
+            } else {
+                target = DASHBOARD_SEVERITY_OK;
+            }
+            // Hysteresis: hold CRIT until the charge has climbed clear of it.
+            const int clear_at =
+                (int)config->battery_crit_pct + (int)config->battery_recover_margin_pct;
+            if (state->severity == DASHBOARD_SEVERITY_CRIT && soc < clear_at) {
+                target = DASHBOARD_SEVERITY_CRIT;
+            }
+            apply_timing(state, target, config, now_ms, config->battery_crit_dwell_ms);
+            if (state->severity == DASHBOARD_SEVERITY_CRIT) {
+                worst = DASHBOARD_ALERT_BATTERY;
+                worst_severity = DASHBOARD_SEVERITY_CRIT;
+            } else if (state->severity > worst_severity) {
+                worst = DASHBOARD_ALERT_BATTERY;
+                worst_severity = state->severity;
+            }
+        }
     }
 
     // Nothing has ever arrived: report that, not the link state that follows from it.
@@ -291,6 +334,21 @@ dashboard_verdict_t dashboard_health_update(dashboard_health_t *health,
     verdict.requires_action =
         worst_severity == DASHBOARD_SEVERITY_CRIT && !verdict.acknowledged;
     return verdict;
+}
+
+void dashboard_health_set_battery(dashboard_health_t *health, int percent, uint64_t now_ms)
+{
+    if (!health || !health->initialised) return;
+    if (percent < 0) {
+        health->battery_known = false;
+        return;
+    }
+    if (health->battery_known && percent > health->last_battery_soc) {
+        // Charge rising means USB power is attached; do not nag while it refills.
+        health->charge_suppress_until_ms = now_ms + health->config.battery_charge_suppress_ms;
+    }
+    health->last_battery_soc = percent;
+    health->battery_known = true;
 }
 
 void dashboard_health_acknowledge(dashboard_health_t *health)

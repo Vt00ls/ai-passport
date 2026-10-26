@@ -24,6 +24,7 @@ typedef enum {
     DASHBOARD_ALERT_LOAD,
     DASHBOARD_ALERT_TEMP,
     DASHBOARD_ALERT_NET,
+    DASHBOARD_ALERT_BATTERY,  // the badge's own battery, not the host's
     DASHBOARD_ALERT_COUNT,
 } dashboard_alert_t;
 
@@ -50,6 +51,16 @@ typedef struct {
     uint16_t load_crit_pct;
     int16_t temp_warn_c;
     int16_t temp_crit_c;
+    // Badge battery. A panel that dies silently is worse than one that nags.
+    uint8_t battery_warn_pct;
+    uint8_t battery_crit_pct;
+    // Leave the CRIT band only after climbing this far above the threshold, because
+    // a battery voltage reading rebounds under load.
+    uint8_t battery_recover_margin_pct;
+    uint32_t battery_crit_dwell_ms;
+    // Rising charge means USB power is attached; stay quiet for this long.
+    uint32_t battery_charge_suppress_ms;
+
     // A threshold breach must persist this long before it becomes CRIT.
     uint32_t crit_dwell_ms;
     // ... and must clear for this long before the severity drops back.
@@ -70,13 +81,19 @@ typedef struct {
 
 typedef struct {
     dashboard_health_config_t config;
-    dashboard_item_state_t items[9];  // indexed by dashboard_alert_t
+    // Sized from the enum, so adding an alert kind can never silently overflow it.
+    dashboard_item_state_t items[DASHBOARD_ALERT_COUNT];
     bool initialised;
 
     // Acknowledged alert: suppresses the pulse, never the colour.
     dashboard_alert_t acknowledged;
     // Last kind reported, used to clear the acknowledgement when things change.
     dashboard_alert_t last_reported;
+
+    // Badge battery, fed by dashboard_health_set_battery().
+    bool battery_known;
+    int last_battery_soc;
+    uint64_t charge_suppress_until_ms;
 
     // Reboot detection: `up` going backwards means the host restarted.
     bool have_uptime;
@@ -101,6 +118,10 @@ void dashboard_health_init(dashboard_health_t *health, const dashboard_health_co
 dashboard_verdict_t dashboard_health_update(dashboard_health_t *health,
                                             const dashboard_snapshot_t *snapshot,
                                             uint64_t now_ms);
+
+// Feed the badge's own battery reading. -1 means "unknown" and disables the alert.
+// A rising reading is treated as charging and suppresses the alert for a while.
+void dashboard_health_set_battery(dashboard_health_t *health, int percent, uint64_t now_ms);
 
 // Silence the pulse for the current alert. The colour stays until it clears.
 void dashboard_health_acknowledge(dashboard_health_t *health);

@@ -333,6 +333,9 @@ static const char *verdict_word(dashboard_alert_t alert, bool *critical_panel)
     case DASHBOARD_ALERT_NET:
         *critical_panel = true;
         return "NETWORK";
+    case DASHBOARD_ALERT_BATTERY:
+        *critical_panel = true;
+        return "LOW BATT";
     case DASHBOARD_ALERT_NONE:
     default:
         return "OK";
@@ -352,6 +355,8 @@ static const char *alert_action(dashboard_alert_t alert)
         return "CHECK COOLING";
     case DASHBOARD_ALERT_NET:
         return "CHECK NETWORK";
+    case DASHBOARD_ALERT_BATTERY:
+        return "PLUG IN THE CHARGER";
     default:
         return "";
     }
@@ -402,10 +407,19 @@ static void set_text(lv_obj_t *label, const char *text, lv_color_t colour)
 static void render_status_page(const dashboard_snapshot_t *snapshot, const dashboard_verdict_t *verdict,
                                uint32_t age_s, bool never, lv_color_t state_colour,
                                bool show_values, bool values_changed, bool reboot_recent,
-                               uint32_t reboot_age_s, uint32_t link_down_s)
+                               uint32_t reboot_age_s, uint32_t link_down_s,
+                               int battery_percent)
 {
-    bool critical_panel = false;
-    const char *word = verdict_word(verdict->alert, &critical_panel);
+    bool breach = false;
+    const char *word = verdict_word(verdict->alert, &breach);
+    // A WARN is a hint, not a takeover: the card keeps showing state, and the amber
+    // indicator row already names the item that is close to its threshold.
+    const bool critical_panel = breach && verdict->severity == DASHBOARD_SEVERITY_CRIT;
+    if (!critical_panel) {
+        if (verdict->severity == DASHBOARD_SEVERITY_WARN && breach) {
+            word = "WARN";
+        }
+    }
 
     if (!values_changed) return;
 
@@ -432,6 +446,13 @@ static void render_status_page(const dashboard_snapshot_t *snapshot, const dashb
             break;
         case DASHBOARD_ALERT_NET:
             snprintf(buffer, sizeof(buffer), "DOWN");
+            break;
+        case DASHBOARD_ALERT_BATTERY:
+            if (battery_percent >= 0) {
+                snprintf(buffer, sizeof(buffer), "%d%%", battery_percent > 100 ? 100 : battery_percent);
+            } else {
+                snprintf(buffer, sizeof(buffer), "--");
+            }
             break;
         default:
             snprintf(buffer, sizeof(buffer), "--");
@@ -672,6 +693,8 @@ static void refresh_timer_cb(lv_timer_t *timer)
     if (!dashboard_state_read(&snapshot)) return;
 
     const uint64_t now_ms = dashboard_state_now_ms();
+    const int battery_percent = bsp_battery_soc();
+    dashboard_health_set_battery(&s_health, battery_percent, now_ms);
     s_verdict_now = dashboard_health_update(&s_health, &snapshot, now_ms);
     const dashboard_age_t age =
         dashboard_heartbeat_age(now_ms, snapshot.last_rx_ms, snapshot.have_rx);
@@ -709,9 +732,14 @@ static void refresh_timer_cb(lv_timer_t *timer)
         snprintf(battery_text, sizeof(battery_text), "%u%%",
                  (unsigned)(soc > 100 ? 100 : soc));
     }
+    const lv_color_t battery_colour = (soc < 0)                        ? COL_MUTED
+                                      : (soc <= 10)                    ? COL_CRIT
+                                      : (soc <= 20)                    ? COL_WARN
+                                                                       : COL_MUTED;
     for (int page = 0; page < PAGE_COUNT; page++) {
         if (!s_chrome[page].battery) continue;
         lv_label_set_text(s_chrome[page].battery, battery_text);
+        lv_obj_set_style_text_color(s_chrome[page].battery, battery_colour, 0);
         if (!s_chrome[page].host) continue;
         // The host name is identity, not a measurement: keep showing it.
         lv_label_set_text(s_chrome[page].host,
@@ -723,7 +751,7 @@ static void refresh_timer_cb(lv_timer_t *timer)
     if (values_changed) {
         render_status_page(&snapshot, &s_verdict_now, age.age_s, age.never_received,
                            state_colour, show_values, true, reboot_recent, reboot_age_s,
-                           dashboard_health_link_down_s(&s_health, now_ms));
+                           dashboard_health_link_down_s(&s_health, now_ms), battery_percent);
         render_detail_page(&snapshot, show_values);
         render_agents_page(&snapshot, show_values);
         paint_beats(show_values ? state_colour : COL_IDLE);

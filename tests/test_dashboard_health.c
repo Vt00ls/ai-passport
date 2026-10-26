@@ -335,6 +335,102 @@ static void test_reboot_detected_from_uptime_regression(void)
     CHECK_EQ(age_s, 90);
 }
 
+static void test_battery_warn_then_crit_after_dwell(void)
+{
+    dashboard_health_t health;
+    dashboard_health_init(&health, NULL);
+    dashboard_snapshot_t snapshot = healthy(1000);
+    snapshot.last_rx_ms = 0;
+
+    // 15 %: low, but not yet dying.
+    dashboard_health_set_battery(&health, 15, 0);
+    snapshot.last_rx_ms = 0;
+    dashboard_verdict_t v = dashboard_health_update(&health, &snapshot, 0);
+    CHECK_EQ(v.alert, DASHBOARD_ALERT_BATTERY);
+    CHECK_EQ(v.severity, DASHBOARD_SEVERITY_WARN);
+
+    // 8 %: CRIT band, but only after the 30 s battery dwell.
+    dashboard_health_set_battery(&health, 8, 0);
+    snapshot.last_rx_ms = 0;
+    dashboard_health_update(&health, &snapshot, 0);   // dwell starts here
+    snapshot.last_rx_ms = 29999;
+    v = dashboard_health_update(&health, &snapshot, 29999);
+    CHECK_EQ(v.severity, DASHBOARD_SEVERITY_WARN);
+    snapshot.last_rx_ms = 30000;
+    v = dashboard_health_update(&health, &snapshot, 30000);
+    CHECK_EQ(v.alert, DASHBOARD_ALERT_BATTERY);
+    CHECK_EQ(v.severity, DASHBOARD_SEVERITY_CRIT);
+    CHECK(v.requires_action);
+}
+
+static void test_battery_crit_outranks_a_silent_host(void)
+{
+    // Decision: a dying badge outranks host problems, because the panel is about to
+    // go dark and plugging in is a two-second fix.
+    dashboard_health_t health;
+    dashboard_health_init(&health, NULL);
+    dashboard_snapshot_t snapshot = healthy(1000);
+    snapshot.last_rx_ms = 0;
+    dashboard_health_set_battery(&health, 5, 0);
+    dashboard_health_update(&health, &snapshot, 0);
+
+    dashboard_verdict_t v = dashboard_health_update(&health, &snapshot, 30000);
+    CHECK_EQ(v.alert, DASHBOARD_ALERT_BATTERY);
+    CHECK_EQ(v.severity, DASHBOARD_SEVERITY_CRIT);
+}
+
+static void test_battery_warn_does_not_outrank_a_crashing_host(void)
+{
+    dashboard_health_t health;
+    dashboard_health_init(&health, NULL);
+    dashboard_snapshot_t snapshot = healthy(1000);
+    snapshot.last_rx_ms = 0;
+    dashboard_health_set_battery(&health, 15, 0);
+    dashboard_health_update(&health, &snapshot, 0);
+
+    // Host goes silent; that is the more severe finding.
+    const dashboard_verdict_t v = dashboard_health_update(&health, &snapshot, 61000);
+    CHECK_EQ(v.alert, DASHBOARD_ALERT_SILENT);
+    CHECK_EQ(v.severity, DASHBOARD_SEVERITY_CRIT);
+}
+
+static void test_battery_hysteresis_and_charging(void)
+{
+    dashboard_health_t health;
+    dashboard_health_init(&health, NULL);
+    dashboard_snapshot_t snapshot = healthy(1000);
+    snapshot.last_rx_ms = 0;
+    dashboard_health_set_battery(&health, 8, 0);
+    dashboard_health_update(&health, &snapshot, 0);
+    dashboard_verdict_t v = dashboard_health_update(&health, &snapshot, 30000);
+    CHECK_EQ(v.severity, DASHBOARD_SEVERITY_CRIT);
+
+    // A flat reading keeps CRIT: the recovery debounce alone must not clear it.
+    dashboard_health_set_battery(&health, 8, 40000);
+    snapshot.last_rx_ms = 40000;
+    v = dashboard_health_update(&health, &snapshot, 50000);
+    CHECK_EQ(v.severity, DASHBOARD_SEVERITY_CRIT);
+
+    // A rising reading means USB power: stay quiet while it refills.
+    dashboard_health_set_battery(&health, 14, 60000);
+    dashboard_health_set_battery(&health, 18, 70000);
+    dashboard_health_set_battery(&health, 15, 80000);  // even if it dips again
+    snapshot.last_rx_ms = 80000;
+    v = dashboard_health_update(&health, &snapshot, 80000);
+    CHECK_EQ(v.alert, DASHBOARD_ALERT_NONE);
+}
+
+static void test_unknown_battery_disables_the_alert(void)
+{
+    dashboard_health_t health;
+    dashboard_health_init(&health, NULL);
+    dashboard_snapshot_t snapshot = healthy(1000);
+    snapshot.last_rx_ms = 0;
+    dashboard_health_set_battery(&health, -1, 0);
+    const dashboard_verdict_t v = dashboard_health_update(&health, &snapshot, 0);
+    CHECK_EQ(v.alert, DASHBOARD_ALERT_NONE);
+}
+
 static void test_null_arguments_are_safe(void)
 {
     dashboard_health_init(NULL, NULL);
@@ -362,6 +458,11 @@ int main(void)
     test_silent_outranks_a_metric_breach();
     test_acknowledge_silences_but_keeps_severity();
     test_reboot_detected_from_uptime_regression();
+    test_battery_warn_then_crit_after_dwell();
+    test_battery_crit_outranks_a_silent_host();
+    test_battery_warn_does_not_outrank_a_crashing_host();
+    test_battery_hysteresis_and_charging();
+    test_unknown_battery_disables_the_alert();
     test_null_arguments_are_safe();
 
     if (s_failures != 0) {
