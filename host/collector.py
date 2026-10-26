@@ -365,9 +365,17 @@ def _find_paseo() -> str | None:
 
 
 def _sanitize_label(text: str, limit: int) -> str:
-    """Keep the protocol's value charset and cap the length."""
-    kept = "".join(ch for ch in text if ch.isalnum() or ch in "._-/")
-    return kept[:limit] or "-"
+    """Keep the protocol's value charset, cap the length, and mark any truncation.
+
+    A shortened workspace name is otherwise indistinguishable from a typo, and real
+    names do hit the cap: chore-dsh-devboard-mcp is 23 characters against a limit of 20.
+    """
+    kept = "".join(ch for ch in text if ch.isalnum() or ch in "._/-~")
+    if not kept:
+        return "-"
+    if len(kept) > limit:
+        return kept[: limit - 1] + "~"
+    return kept
 
 
 def read_paseo_agents(paseo_bin: str, timeout: float, now: float,

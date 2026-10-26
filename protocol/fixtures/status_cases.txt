@@ -21,6 +21,7 @@ ok|v=1;t=1782530000;as=-1
 ok|v=1;t=1782530000;net=wlan0,down,-
 ok|v=1;t=1782530000;h=Ubuntu-Box-Dev
 ok|v=1;t=1782530000;ar=1;ws=feature-dashboard;pv=dsh
+ok|v=1;t=1782530000;ar=1;ws=chore-dsh-devboard-~;pv=pi
 ok|v=1;t=1782530000;ar=0
 ok|v=1;t=1782530000;nc=1
 ok|v=1;t=1782530000;nc=1024

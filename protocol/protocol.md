@@ -40,7 +40,9 @@ Rules:
 - Total encoded length MUST NOT exceed **200 bytes** so the payload fits in one
   BLE ATT write after MTU negotiation. The badge MUST negotiate an ATT MTU of at
   least 200 payload bytes (the ESP32-C3 stack supports MTU exchange up to 517).
-- Value charset is `[A-Za-z0-9._/-]` only. `net` additionally uses `,` as its
+- Value charset is `[A-Za-z0-9._/-~]` only. A trailing `~` marks a value the
+producer shortened to fit its limit, so a cut label reads as truncated rather than
+misspelled. `net` additionally uses `,` as its
   internal separator. No `;`, `=`, space, or newline in any value. Producers
   sanitize: illegal characters are dropped; an empty result becomes `-`.
 

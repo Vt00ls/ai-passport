@@ -51,6 +51,7 @@ static bool is_value_char(char c, bool allow_comma)
     case '_':
     case '/':
     case '-':
+    case '~':  // truncation marker: a shortened label says so instead of looking wrong
         return true;
     case ',':
         return allow_comma;

@@ -104,6 +104,15 @@ class HostnameTest(unittest.TestCase):
     def test_short_name_is_kept(self) -> None:
         self.assertEqual(collector.short_hostname("Ubuntu-Box-Dev"), "Ubuntu-Box-Dev")
 
+    def test_truncated_workspace_is_marked(self) -> None:
+        # Real name from the host: 23 characters against a 20-character limit.
+        self.assertEqual(
+            collector._sanitize_label("chore-dsh-devboard-mcp", 20), "chore-dsh-devboard-~"
+        )
+
+    def test_workspace_that_fits_is_untouched(self) -> None:
+        self.assertEqual(collector._sanitize_label("devilish-ladybug", 20), "devilish-ladybug")
+
     def test_over_long_label_is_capped(self) -> None:
         name = collector.short_hostname("a" * 60)
         self.assertEqual(len(name), protocol_mod.HOST_MAX)

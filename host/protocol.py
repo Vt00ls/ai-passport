@@ -58,7 +58,7 @@ INT_RANGES = {
 }
 
 _VALUE_CHARS = frozenset(
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._/-"
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._/-~"
 )
 # net is the only field whose value may contain a comma separator.
 _NET_CHARS = _VALUE_CHARS | frozenset({","})
