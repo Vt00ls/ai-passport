@@ -32,9 +32,11 @@ SyslogIdentifier=ai-passport-dashboard
 
 # The pusher needs the system D-Bus socket, the session log tree, and BlueZ.
 NoNewPrivileges=yes
-# PrivateTmp is deliberately NOT set: it gives the service its own /tmp, which would
-# split the single-instance lock file away from a pusher started by hand, letting two
-# instances fight over the one connection the badge accepts.
+# Keep PrivateTmp: with ProtectSystem=strict below, /tmp is only writable because this
+# gives the service a private tmpfs. Removing it made every start fail with "No usable
+# temporary directory". The single-instance lock therefore lives in /dev/shm, which is
+# shared with a pusher started by hand and is exempt from ProtectSystem.
+PrivateTmp=yes
 ProtectSystem=strict
 ProtectHome=read-only
 ProtectKernelTunables=yes

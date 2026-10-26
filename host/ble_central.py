@@ -308,12 +308,36 @@ def acquire_single_instance():
     import fcntl
     import tempfile
 
-    # A path outside any per-service private /tmp: the lock must be visible to every
-    # candidate process, including one started by hand.
+    # The lock has to be visible to every candidate process, including one started by
+    # hand, while the service runs with PrivateTmp and ProtectSystem=strict: /tmp is
+    # private to the unit and the rest of the filesystem is read-only. /dev/shm
+    # satisfies both, because it lives under /dev and is not namespaced by PrivateTmp.
+    candidates = []
     runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
-    directory = runtime_dir if runtime_dir and os.path.isdir(runtime_dir) else tempfile.gettempdir()
-    path = os.path.join(directory, "ai-passport-dashboard.lock")
-    handle = open(path, "w", encoding="utf-8")
+    if runtime_dir and os.path.isdir(runtime_dir):
+        candidates.append(runtime_dir)
+    if os.path.isdir("/dev/shm") and os.access("/dev/shm", os.W_OK):
+        candidates.append("/dev/shm")
+    try:
+        candidates.append(tempfile.gettempdir())
+    except (OSError, FileNotFoundError):
+        pass
+
+    handle = None
+    path = ""
+    for directory in candidates:
+        candidate = os.path.join(directory, "ai-passport-dashboard.lock")
+        try:
+            handle = open(candidate, "w", encoding="utf-8")
+            path = candidate
+            break
+        except OSError:
+            continue
+    if handle is None:
+        # Never take the service down over a lock: running unlocked beats crash-looping,
+        # and the duplicate-instance risk is reported instead.
+        LOGGER.warning("no writable lock directory; running without a single-instance lock")
+        return open(os.devnull, "w", encoding="utf-8")
     try:
         fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
