@@ -57,6 +57,7 @@ static TaskHandle_t s_host_task;
 // a watchdog below re-arms it.
 static volatile bool s_adv_active;
 static esp_timer_handle_t s_adv_watchdog;
+static uint64_t s_adv_last_restart_ms;
 
 // Single connection (CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1), so one scratch buffer is
 // enough and it never races: only the NimBLE host task runs the write path.
@@ -115,13 +116,37 @@ static int begin_advertising(void)
 }
 
 // Safety net: a headless badge that stops advertising is unreachable until someone
-// power-cycles it, so re-arm advertising whenever it should be up but is not.
+// power-cycles it. On hardware the controller once went quiet with no GAP event at all
+// and the badge stayed invisible for minutes, so trust the stack's own view rather than
+// our bookkeeping, and force a restart if we have been unconnected for a while.
+#define ADV_FORCE_RESTART_MS 20000u
+
 static void adv_watchdog(void *arg)
 {
     (void)arg;
-    if (!s_initialized || s_state == DASHBOARD_BLE_CONNECTED || s_adv_active) return;
-    ESP_LOGW(TAG, "advertising is down; re-arming");
-    (void)begin_advertising();
+    if (!s_initialized || s_state == DASHBOARD_BLE_CONNECTED) {
+        s_adv_last_restart_ms = 0;
+        return;
+    }
+
+    const uint64_t now_ms = dashboard_state_now_ms();
+    if (!ble_gap_adv_active()) {
+        ESP_LOGW(TAG, "advertising is down; re-arming");
+        (void)begin_advertising();
+        return;
+    }
+
+    // Still nominally advertising but nobody connected for a long time: restart the
+    // advertiser, which clears any controller-side state we cannot see.
+    if (s_adv_last_restart_ms == 0) {
+        s_adv_last_restart_ms = now_ms;
+    } else if (now_ms - s_adv_last_restart_ms >= ADV_FORCE_RESTART_MS) {
+        ESP_LOGW(TAG, "no central for %u ms; restarting advertising",
+                 (unsigned)ADV_FORCE_RESTART_MS);
+        s_adv_last_restart_ms = now_ms;
+        (void)ble_gap_adv_stop();
+        (void)begin_advertising();
+    }
 }
 
 static int gatt_access(uint16_t conn_handle, uint16_t attr_handle,
@@ -194,6 +219,7 @@ static int gap_event(struct ble_gap_event *event, void *arg)
         if (event->connect.status == 0) {
             s_mtu = ble_att_mtu(event->connect.conn_handle);
             s_adv_active = false;
+            s_adv_last_restart_ms = 0;
             s_state = DASHBOARD_BLE_CONNECTED;
             dashboard_state_set_connected(true);
             // At connection time the MTU is always the BLE minimum (23); the exchange

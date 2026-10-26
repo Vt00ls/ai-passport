@@ -28,6 +28,7 @@ import errno
 import logging
 import os
 import signal
+import subprocess
 import sys
 import time
 from dataclasses import dataclass
@@ -123,6 +124,37 @@ def backoff_delay(attempt: int, base: float, maximum: float) -> float:
     return min(delay, maximum)
 
 
+def drop_stale_connection(device_name: str) -> None:
+    """Disconnect our badge if BlueZ still holds a link for it.
+
+    A central that dies without closing the link leaves the peripheral believing it is
+    still connected, and a peripheral does not advertise while connected. BlueZ can
+    forget the device record while the controller-side link lingers, so a fresh pusher
+    scans and finds nothing for minutes. Nothing the badge can do: the peer's controller
+    is still answering. Clearing it at startup turns that into a normal scan.
+    """
+    try:
+        listing = subprocess.run(
+            ["bluetoothctl", "devices", "Connected"],
+            capture_output=True, text=True, timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return
+    for line in listing.stdout.splitlines():
+        fields = line.split(" ", 2)  # "Device AA:BB:CC:DD:EE:FF Name"
+        if len(fields) < 3 or fields[0] != "Device":
+            continue
+        address, name = fields[1], fields[2]
+        if name != device_name:
+            continue
+        try:
+            subprocess.run(["bluetoothctl", "disconnect", address],
+                           capture_output=True, timeout=10)
+            LOGGER.info("dropped a stale link to %s (%s)", name, address)
+        except (OSError, subprocess.SubprocessError):
+            LOGGER.warning("could not drop the stale link to %s", address)
+
+
 async def find_device(settings: Settings):
     """Scan for the badge by service UUID, falling back to its advertised name."""
     from bleak import BleakScanner
@@ -156,6 +188,7 @@ class Pusher:
     async def run(self) -> None:
         from bleak import BleakClient
 
+        drop_stale_connection(self.settings.device_name)
         device = await find_device(self.settings)
         if device is None:
             raise RuntimeError("badge not found in scan")
@@ -275,7 +308,11 @@ def acquire_single_instance():
     import fcntl
     import tempfile
 
-    path = os.path.join(tempfile.gettempdir(), "ai-passport-dashboard.lock")
+    # A path outside any per-service private /tmp: the lock must be visible to every
+    # candidate process, including one started by hand.
+    runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
+    directory = runtime_dir if runtime_dir and os.path.isdir(runtime_dir) else tempfile.gettempdir()
+    path = os.path.join(directory, "ai-passport-dashboard.lock")
     handle = open(path, "w", encoding="utf-8")
     try:
         fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
