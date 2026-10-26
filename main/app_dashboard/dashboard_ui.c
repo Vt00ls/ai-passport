@@ -67,6 +67,7 @@ static lv_timer_t *s_timer;
 static lv_obj_t *s_card;
 static lv_obj_t *s_verdict;
 static lv_obj_t *s_card_value;
+static lv_obj_t *s_card_caption;
 static lv_obj_t *s_strip;
 static lv_chart_series_t *s_strip_series;
 static lv_obj_t *s_caption;
@@ -181,12 +182,19 @@ static void build_status_page(void)
     lv_obj_set_style_border_width(s_card, 2, 0);
     lv_obj_set_style_border_color(s_card, COL_OK, 0);
 
-    s_verdict = make_label(s_card, &lv_font_montserrat_36, COL_OK, 0, 12);
+    s_verdict = make_label(s_card, &lv_font_montserrat_36, COL_OK, 0, 8);
     lv_obj_set_width(s_verdict, 212);
     lv_obj_set_style_text_align(s_verdict, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text(s_verdict, "--");
 
-    s_card_value = make_label(s_card, &lv_font_montserrat_48, COL_TEXT, 0, 50);
+    // The caption disambiguates what the big number means: uptime while healthy,
+    // time since the last frame once the host stops answering.
+    s_card_caption = make_label(s_card, &lv_font_montserrat_14, COL_MUTED, 0, 46);
+    lv_obj_set_width(s_card_caption, 212);
+    lv_obj_set_style_text_align(s_card_caption, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_text(s_card_caption, "");
+
+    s_card_value = make_label(s_card, &lv_font_montserrat_36, COL_TEXT, 0, 64);
     lv_obj_set_width(s_card_value, 212);
     lv_obj_set_style_text_align(s_card_value, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text(s_card_value, "--");
@@ -394,7 +402,7 @@ static void set_text(lv_obj_t *label, const char *text, lv_color_t colour)
 static void render_status_page(const dashboard_snapshot_t *snapshot, const dashboard_verdict_t *verdict,
                                uint32_t age_s, bool never, lv_color_t state_colour,
                                bool show_values, bool values_changed, bool reboot_recent,
-                               uint32_t reboot_age_s)
+                               uint32_t reboot_age_s, uint32_t link_down_s)
 {
     bool critical_panel = false;
     const char *word = verdict_word(verdict->alert, &critical_panel);
@@ -429,6 +437,10 @@ static void render_status_page(const dashboard_snapshot_t *snapshot, const dashb
             snprintf(buffer, sizeof(buffer), "--");
             break;
         }
+        // A metric breach is the one case that keeps the number as the hero.
+        lv_obj_set_style_text_font(s_card_value, &lv_font_montserrat_48, 0);
+        lv_obj_set_pos(s_card_value, 0, 44);
+        set_text(s_card_caption, "", COL_BG);
         set_text(s_card_value, buffer, COL_BG);
         snprintf(buffer, sizeof(buffer), "%s", alert_action(verdict->alert));
         set_text(s_statusline, buffer, COL_CRIT);
@@ -436,9 +448,31 @@ static void render_status_page(const dashboard_snapshot_t *snapshot, const dashb
         lv_obj_set_style_bg_color(s_card, COL_CARD, 0);
         lv_obj_set_style_border_color(s_card, state_colour, 0);
         set_text(s_verdict, word, state_colour);
-        char age_text[24];
-        dashboard_format_age(age_text, sizeof(age_text), age_s, never);
-        set_text(s_card_value, age_text,
+        lv_obj_set_style_text_font(s_card_value, &lv_font_montserrat_36, 0);
+        lv_obj_set_pos(s_card_value, 0, 64);
+
+        // Uptime while the host is answering; time since the last frame once it is not.
+        // Uptime is monotonic, so the number no longer resets every push interval.
+        char value_text[24];
+        const char *caption = "UPTIME";
+        if (verdict->alert == DASHBOARD_ALERT_SILENT) {
+            caption = "NO FRAMES FOR";
+            dashboard_format_age(value_text, sizeof(value_text), age_s, never);
+        } else if (verdict->alert == DASHBOARD_ALERT_NO_LINK) {
+            // The link-down duration, not the frame age: they start at different times.
+            caption = "DOWN FOR";
+            dashboard_format_age(value_text, sizeof(value_text), link_down_s, false);
+        } else if (verdict->alert == DASHBOARD_ALERT_NO_DATA) {
+            caption = "LAST PUSH";
+            dashboard_format_text(value_text, sizeof(value_text), false, NULL);
+        } else if (dashboard_status_has(status, DASHBOARD_FIELD_UPTIME)) {
+            dashboard_format_uptime(value_text, sizeof(value_text), status->uptime_s);
+        } else {
+            dashboard_format_text(value_text, sizeof(value_text), false, NULL);
+        }
+        set_text(s_card_caption, caption,
+                 (verdict->severity == DASHBOARD_SEVERITY_OK) ? COL_MUTED : state_colour);
+        set_text(s_card_value, value_text,
                  (verdict->severity == DASHBOARD_SEVERITY_OK) ? COL_TEXT : state_colour);
 
         if (reboot_recent) {
@@ -477,12 +511,8 @@ static void render_status_page(const dashboard_snapshot_t *snapshot, const dashb
         dashboard_status_has(status, DASHBOARD_FIELD_DISK),
         dashboard_status_has(status, DASHBOARD_FIELD_TEMP),
     };
-    int values[4] = { 0, status->mem_percent, status->disk_percent, status->temp_c };
-    if (has[0] && status->cores > 0) {
-        values[0] = (int)(status->load_x100 / status->cores);
-    }
     for (int i = 0; i < 4; i++) {
-        char text[24];
+        char text[32];
         if (!show_values || !has[i]) {
             snprintf(text, sizeof(text), "%s --", names[i]);
             set_text(s_ind_label[i], text, COL_DIM);
@@ -492,8 +522,35 @@ static void render_status_page(const dashboard_snapshot_t *snapshot, const dashb
             }
             continue;
         }
-        const int percent = values[i] < 0 ? 0 : (values[i] > 100 ? 100 : values[i]);
-        snprintf(text, sizeof(text), "%s %d%%", names[i], values[i]);
+        // Each row has its own unit: percent for memory and disk, the raw load
+        // average against the core count, and degrees for temperature. A shared
+        // format string put a "%" on the temperature and confused the load value.
+        int percent = 0;
+        switch (i) {
+        case 0: {  // LOAD: show "0.42/6" so it matches what top reports, while the
+                   // bar still fills by capacity so the colour reads at a glance.
+            char load_text[16];
+            dashboard_format_load(load_text, sizeof(load_text), status->load_x100);
+            snprintf(text, sizeof(text), "%s %s/%u", names[0], load_text,
+                     (unsigned)status->cores);
+            percent = (int)(status->load_x100 / status->cores);
+            break;
+        }
+        case 1:
+            snprintf(text, sizeof(text), "%s %u%%", names[1], (unsigned)status->mem_percent);
+            percent = status->mem_percent;
+            break;
+        case 2:
+            snprintf(text, sizeof(text), "%s %u%%", names[2], (unsigned)status->disk_percent);
+            percent = status->disk_percent;
+            break;
+        default:
+            snprintf(text, sizeof(text), "%s %dC", names[3], (int)status->temp_c);
+            percent = status->temp_c;
+            break;
+        }
+        if (percent < 0) percent = 0;
+        if (percent > 100) percent = 100;
         set_text(s_ind_label[i], text, COL_MUTED);
         if (s_ind_bar[i]) {
             lv_bar_set_value(s_ind_bar[i], percent, LV_ANIM_OFF);
@@ -665,7 +722,8 @@ static void refresh_timer_cb(lv_timer_t *timer)
 
     if (values_changed) {
         render_status_page(&snapshot, &s_verdict_now, age.age_s, age.never_received,
-                           state_colour, show_values, true, reboot_recent, reboot_age_s);
+                           state_colour, show_values, true, reboot_recent, reboot_age_s,
+                           dashboard_health_link_down_s(&s_health, now_ms));
         render_detail_page(&snapshot, show_values);
         render_agents_page(&snapshot, show_values);
         paint_beats(show_values ? state_colour : COL_IDLE);
@@ -680,18 +738,19 @@ static void refresh_timer_cb(lv_timer_t *timer)
         s_rendered_age_s = UINT32_MAX;
     }
 
-    // The age ticks every second; rewrite it only when the text changes.
-    if (s_rendered_age_s != age.age_s || s_rendered_never != age.never_received) {
+    // Only the silence states carry a per-second number; healthy states show uptime,
+    // which changes at most once a minute, so they are refreshed by values_changed.
+    const uint32_t link_down_s = dashboard_health_link_down_s(&s_health, now_ms);
+    const uint32_t ticking_s =
+        (s_verdict_now.alert == DASHBOARD_ALERT_NO_LINK) ? link_down_s : age.age_s;
+    if ((s_verdict_now.alert == DASHBOARD_ALERT_SILENT ||
+         s_verdict_now.alert == DASHBOARD_ALERT_NO_LINK) &&
+        (s_rendered_age_s != ticking_s || s_rendered_never != age.never_received)) {
         char age_text[24];
-        dashboard_format_age(age_text, sizeof(age_text), age.age_s, age.never_received);
-        if (s_verdict_now.alert == DASHBOARD_ALERT_NONE ||
-            s_verdict_now.alert == DASHBOARD_ALERT_NO_LINK ||
-            s_verdict_now.alert == DASHBOARD_ALERT_NO_DATA) {
-            set_text(s_card_value, age_text,
-                     (s_verdict_now.severity == DASHBOARD_SEVERITY_OK) ? COL_TEXT : state_colour);
-        }
+        dashboard_format_age(age_text, sizeof(age_text), ticking_s, age.never_received);
+        set_text(s_card_value, age_text, state_colour);
         paint_beats(show_values ? state_colour : COL_IDLE);
-        s_rendered_age_s = age.age_s;
+        s_rendered_age_s = ticking_s;
         s_rendered_never = age.never_received;
     }
 
@@ -750,7 +809,7 @@ void dashboard_ui_stop(void)
         s_chrome[page].battery = NULL;
         for (int index = 0; index < PAGE_COUNT; index++) s_dots[page][index] = NULL;
     }
-    s_card = s_verdict = s_card_value = s_strip = s_caption = s_statusline = NULL;
+    s_card = s_verdict = s_card_value = s_card_caption = s_strip = s_caption = s_statusline = NULL;
     s_strip_series = NULL;
     for (int i = 0; i < 4; i++) {
         s_ind_label[i] = NULL;

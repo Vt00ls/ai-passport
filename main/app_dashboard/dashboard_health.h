@@ -105,6 +105,11 @@ dashboard_verdict_t dashboard_health_update(dashboard_health_t *health,
 // Silence the pulse for the current alert. The colour stays until it clears.
 void dashboard_health_acknowledge(dashboard_health_t *health);
 
+// How long the BLE link itself has been down, or 0 while connected. The dashboard
+// shows this for NO LINK: "DOWN FOR" must not quote the frame age, which starts
+// earlier (the pusher can stop before the link drops).
+uint32_t dashboard_health_link_down_s(const dashboard_health_t *health, uint64_t now_ms);
+
 // How long ago a host reboot was detected. Returns false when no reboot has been
 // seen; the age is written to `out_s` only when it returns true, so "just now" and
 // "never" cannot be confused.

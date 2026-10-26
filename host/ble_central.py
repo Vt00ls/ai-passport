@@ -169,15 +169,10 @@ class Pusher:
         async with BleakClient(device, timeout=self.settings.connect_timeout_s,
                                disconnected_callback=on_disconnect) as client:
             self.client = client
-            mtu = getattr(client, "mtu_size", None)
-            if mtu:
-                LOGGER.info("connected; ATT MTU %d (need >= %d)", mtu, REQUIRED_MTU)
-                if mtu < REQUIRED_MTU:
-                    LOGGER.warning(
-                        "MTU %d is below %d: the badge may reject the frame", mtu, REQUIRED_MTU
-                    )
-            else:
-                LOGGER.info("connected; MTU not reported by this backend")
+            # The MTU is not available yet: the backend reports its default until the
+            # stack has exchanged MTUs, so judging it here produced a false alarm on
+            # real hardware. The value is reported after the first successful write.
+            LOGGER.info("connected; MTU is negotiated during the first exchanges")
 
             next_frame = time.monotonic()
             while not self.stop_requested.is_set():
@@ -205,10 +200,21 @@ class Pusher:
                 self.settings.characteristic_uuid, frame, response=True
             )
             self.frames_sent += 1
+            if self.frames_sent == 1:
+                mtu = getattr(client, "mtu_size", None)
+                if mtu and mtu != 23:
+                    LOGGER.info("negotiated ATT MTU %d (frames need %d)", mtu, REQUIRED_MTU)
+                else:
+                    LOGGER.info("MTU still reported as %s; frames up to %d bytes are going "
+                                "through anyway", mtu, len(frame))
             LOGGER.debug("sent %d bytes: %s", len(frame), frame.decode("utf-8", "replace"))
         except Exception as error:  # bleak raises backend-specific errors
             self.write_errors += 1
-            LOGGER.warning("write failed (%d total): %s", self.write_errors, error)
+            hint = ""
+            if self.write_errors == 1:
+                hint = (f" (a frame of {len(frame)} bytes needs an ATT MTU of at least "
+                        f"{REQUIRED_MTU}; check the badge's MTU log)")
+            LOGGER.warning("write failed (%d total): %s%s", self.write_errors, error, hint)
 
 
 async def run_forever(settings: Settings) -> int:
@@ -259,6 +265,34 @@ def run_dry(settings: Settings, frames: int, interval: float) -> int:
     return 0
 
 
+def acquire_single_instance():
+    """Hold an exclusive lock so two pushers cannot fight over one connection.
+
+    The badge accepts a single central. A second pusher disconnects the first and
+    the screen shows a link that never carries data, which is hard to diagnose from
+    the outside, so refuse to start instead.
+    """
+    import fcntl
+    import tempfile
+
+    path = os.path.join(tempfile.gettempdir(), "ai-passport-dashboard.lock")
+    handle = open(path, "w", encoding="utf-8")
+    try:
+        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        handle.seek(0)
+        holder = handle.read().strip()
+        handle.close()
+        LOGGER.error("another pusher is already running (pid %s, lock %s)", holder or "?",
+                     path)
+        return None
+    handle.seek(0)
+    handle.truncate()
+    handle.write(str(os.getpid()))
+    handle.flush()
+    return handle
+
+
 def build_parser() -> argparse.ArgumentParser:
     default_config = os.path.join(_THIS_DIR, "dashboard.conf")
     parser = argparse.ArgumentParser(description=__doc__,
@@ -307,6 +341,9 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
 
+    lock = acquire_single_instance()
+    if lock is None:
+        return 3
     try:
         return asyncio.run(run_forever(settings))
     except KeyboardInterrupt:

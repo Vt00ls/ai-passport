@@ -12,6 +12,7 @@
 #include "app_dashboard/dashboard_state.h"
 #include "demo_radio.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
@@ -51,6 +52,11 @@ static uint8_t s_addr_type;
 static bool s_initialized;
 static SemaphoreHandle_t s_host_stopped;
 static TaskHandle_t s_host_task;
+// True while we believe the controller is advertising. NimBLE stops advertising on
+// connect and on a failed connection attempt, and the restart can fail silently, so
+// a watchdog below re-arms it.
+static volatile bool s_adv_active;
+static esp_timer_handle_t s_adv_watchdog;
 
 // Single connection (CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1), so one scratch buffer is
 // enough and it never races: only the NimBLE host task runs the write path.
@@ -58,7 +64,7 @@ static char s_write_scratch[DASHBOARD_STATUS_MAX_BYTES];
 
 static int gap_event(struct ble_gap_event *event, void *arg);
 
-static int advertise(void)
+static int begin_advertising(void)
 {
     struct ble_hs_adv_fields fields;
     memset(&fields, 0, sizeof(fields));
@@ -91,13 +97,31 @@ static int advertise(void)
     params.conn_mode = BLE_GAP_CONN_MODE_UND;
     params.disc_mode = BLE_GAP_DISC_MODE_GEN;
     rc = ble_gap_adv_start(s_addr_type, NULL, BLE_HS_FOREVER, &params, gap_event, NULL);
+    if (rc == BLE_HS_EALREADY) {
+        // Already advertising: on real hardware this happened after a disconnect and
+        // was treated as a failure, which left the badge invisible to every scanner.
+        s_adv_active = true;
+        return 0;
+    }
     if (rc != 0) {
         ESP_LOGE(TAG, "adv start failed: %d", rc);
+        s_adv_active = false;
         return rc;
     }
+    s_adv_active = true;
     s_state = DASHBOARD_BLE_ADVERTISING;
     ESP_LOGI(TAG, "advertising as %s", DASHBOARD_DEVICE_NAME);
     return 0;
+}
+
+// Safety net: a headless badge that stops advertising is unreachable until someone
+// power-cycles it, so re-arm advertising whenever it should be up but is not.
+static void adv_watchdog(void *arg)
+{
+    (void)arg;
+    if (!s_initialized || s_state == DASHBOARD_BLE_CONNECTED || s_adv_active) return;
+    ESP_LOGW(TAG, "advertising is down; re-arming");
+    (void)begin_advertising();
 }
 
 static int gatt_access(uint16_t conn_handle, uint16_t attr_handle,
@@ -169,32 +193,40 @@ static int gap_event(struct ble_gap_event *event, void *arg)
     case BLE_GAP_EVENT_CONNECT:
         if (event->connect.status == 0) {
             s_mtu = ble_att_mtu(event->connect.conn_handle);
+            s_adv_active = false;
             s_state = DASHBOARD_BLE_CONNECTED;
             dashboard_state_set_connected(true);
-            ESP_LOGI(TAG, "connected; ATT MTU %u (need >= %u)", (unsigned)s_mtu,
-                     (unsigned)(DASHBOARD_STATUS_MAX_BYTES + 3));
-            if (s_mtu < DASHBOARD_STATUS_MAX_BYTES + 3) {
-                ESP_LOGW(TAG, "MTU below %u: the status frame will not fit in one write",
-                         (unsigned)(DASHBOARD_STATUS_MAX_BYTES + 3));
-            }
+            // At connection time the MTU is always the BLE minimum (23); the exchange
+            // that actually sizes it arrives as BLE_GAP_EVENT_MTU a few tens of
+            // milliseconds later. Judging the MTU here produced a false alarm on real
+            // hardware, so the check lives in the MTU event instead.
+            ESP_LOGI(TAG, "connected; initial ATT MTU %u (exchange follows)",
+                     (unsigned)s_mtu);
         } else {
             ESP_LOGW(TAG, "connect failed: %d", event->connect.status);
-            (void)advertise();
+            s_adv_active = false;
+            (void)begin_advertising();
         }
         break;
     case BLE_GAP_EVENT_DISCONNECT:
         ESP_LOGI(TAG, "disconnected; reason %d", event->disconnect.reason);
         dashboard_state_set_connected(false);
         // Keep advertising so a host reboot reconnects without user action.
-        (void)advertise();
+        s_adv_active = false;
+        (void)begin_advertising();
         break;
     case BLE_GAP_EVENT_ADV_COMPLETE:
-        (void)advertise();
+        s_adv_active = false;
+        (void)begin_advertising();
         break;
     case BLE_GAP_EVENT_MTU:
         s_mtu = event->mtu.value;
         ESP_LOGI(TAG, "MTU updated to %u (channel %d)", (unsigned)event->mtu.value,
                  event->mtu.channel_id);
+        if (s_mtu < DASHBOARD_STATUS_MAX_BYTES + 3) {
+            ESP_LOGW(TAG, "MTU %u is below %u: the status frame needs splitting",
+                     (unsigned)s_mtu, (unsigned)(DASHBOARD_STATUS_MAX_BYTES + 3));
+        }
         break;
     default:
         break;
@@ -213,7 +245,7 @@ static void on_sync(void)
 {
     int rc = ble_hs_util_ensure_addr(0);
     if (rc == 0) rc = ble_hs_id_infer_auto(0, &s_addr_type);
-    if (rc == 0) rc = advertise();
+    if (rc == 0) rc = begin_advertising();
     if (rc != 0) {
         s_last_error = rc;
         s_state = DASHBOARD_BLE_FAILED;
@@ -280,6 +312,16 @@ esp_err_t dashboard_ble_start(void)
 
     ble_hs_cfg.reset_cb = on_reset;
     ble_hs_cfg.sync_cb = on_sync;
+
+    const esp_timer_create_args_t timer_args = {
+        .callback = adv_watchdog,
+        .name = "adv_wd",
+    };
+    if (esp_timer_create(&timer_args, &s_adv_watchdog) == ESP_OK) {
+        (void)esp_timer_start_periodic(s_adv_watchdog, 1000000);  // 1 s
+    } else {
+        ESP_LOGW(TAG, "advertising watchdog unavailable");
+    }
 
     if (xTaskCreate(host_task, "dash_nimble", NIMBLE_HS_STACK_SIZE, NULL,
                     configMAX_PRIORITIES - 4, &s_host_task) != pdPASS) {

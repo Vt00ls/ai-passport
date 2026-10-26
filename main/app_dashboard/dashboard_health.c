@@ -299,6 +299,14 @@ void dashboard_health_acknowledge(dashboard_health_t *health)
     health->acknowledged = health->last_reported;
 }
 
+uint32_t dashboard_health_link_down_s(const dashboard_health_t *health, uint64_t now_ms)
+{
+    if (!health || !health->initialised) return 0;
+    const dashboard_item_state_t *link = &health->items[DASHBOARD_ALERT_NO_LINK];
+    if (!link->have_down || now_ms <= link->down_since_ms) return 0;
+    return (uint32_t)((now_ms - link->down_since_ms) / 1000u);
+}
+
 bool dashboard_health_reboot_age_s(const dashboard_health_t *health, uint64_t now_ms,
                                    uint32_t *out_s)
 {

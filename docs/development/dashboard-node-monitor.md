@@ -141,7 +141,8 @@ glyphs render straight out of flash.
  Ubuntu-Box-Dev    87%
  +----------------------+
  |         OK           |   status word, 36 px, state colour
- |         6s           |   heartbeat age, 48 px
+ |       UPTIME         |   what the number means, 14 px
+ |       1d 11h         |   36 px
  +----------------------+
  |||||||||||||||||||||      heartbeat history, 60 slots x 5 s
  LAST 5 MIN
@@ -151,6 +152,16 @@ glyphs render straight out of flash.
  [##-]          [##--]
  eno1   2 agents
 ```
+
+The big number carries a caption, because its meaning depends on the state:
+`UPTIME` while the host answers, `NO FRAMES FOR` when frames stop, `DOWN FOR` when
+the link itself drops, and `LAST PUSH` before anything has arrived. Uptime is
+monotonic, so a healthy panel no longer shows a counter that resets every push
+interval, which read like a fault.
+
+`DOWN FOR` deliberately counts from the disconnect, not from the last frame: a
+pusher that stops while the link stays up makes those two times differ by minutes,
+and quoting the frame age there was misleading.
 
 The heartbeat strip is one bar per 5 s slot. A received frame fills its slot; a
 frame that never arrived leaves a gap. A frozen host therefore leaves a visible
