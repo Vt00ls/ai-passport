@@ -54,12 +54,18 @@ v=1;t=1782530000;h=dev-forge;up=86400;ld=0.42;cpu=7;mem=38;dsk=33;tmp=51;net=eno
 | `net` | str | `接口,状态,IP`；`状态` 为 `up` 或 `down`，`IP` 为 IPv4 或 `-`。 | `net=eno1,up,10.2.65.61` |
 | `ag` | int | 活跃 agent 会话数：最近 300 秒内有活动的会话数。 | `ag=2` |
 | `as` | int | 距最近一次 agent 活动的秒数；从未活动则为 `-1`。 | `as=5` |
+| `ar` | int | 当前正在运行的 agent 数，0–99。`0` 表示全部空闲。 | `ar=1` |
+| `ws` | str | 最近启动的那个运行中 agent 的工作区，ASCII，≤ 20 字符。 | `ws=feature-dashboard` |
+| `pv` | str | 该 agent 的提供方 id，≤ 8 字符；用于选择 logo。 | `pv=dsh` |
 
 字段到页面的映射：
 
 - 主机健康页：`up`、`ld`、`cpu`、`mem`、`dsk`、`tmp`。
 - 网络页：`net`。
-- agent 状态页：`ag`、`as`。
+- agent 页：有任务在跑时用 `ar`、`ws`、`pv`；否则用 `as`。
+
+`ag`/`as` 保留为降级信号：它们来自会话文件活动，而长工具调用期间文件不动。能查询 agent
+监管进程的生产端应改填 `ar`/`ws`/`pv`/`pm`，因为那是 agent 自己报的状态。
 - 心跳横幅（所有页面）：距今 = 工牌单调时钟 − 最后一次成功收到状态时的单调时刻。
   不使用 `t` 与工牌时钟比较。
 

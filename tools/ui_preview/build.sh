@@ -34,7 +34,8 @@ find "$LVGL/src" -name '*.c' | while read -r src; do
 done
 
 echo "compiling the dashboard sources under test..."
-for unit in dashboard_ui dashboard_health dashboard_format dashboard_protocol; do
+for unit in dashboard_ui dashboard_health dashboard_format dashboard_protocol \
+            dashboard_logos dashboard_logos_pi dashboard_logos_dsh; do
     "$CC" "${CFLAGS[@]}" -c "$REPO/main/app_dashboard/$unit.c" -o "$OBJ/dash_$unit.o"
 done
 "$CC" "${CFLAGS[@]}" -c "$HERE/harness/render_states.c" -o "$OBJ/render_states.o"

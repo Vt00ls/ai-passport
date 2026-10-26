@@ -17,6 +17,8 @@ MAX_BYTES = 200
 HOST_MAX = 24
 NET_IFACE_MAX = 12
 NET_IPV4_MAX = 15
+WORKSPACE_MAX = 20
+PROVIDER_MAX = 8
 
 # Field order on the wire. Keys are lowercase ASCII.
 FIELD_ORDER: Tuple[str, ...] = (
@@ -33,9 +35,12 @@ FIELD_ORDER: Tuple[str, ...] = (
     "net",
     "ag",
     "as",
+    "ar",
+    "ws",
+    "pv",
 )
 KNOWN_KEYS = frozenset(FIELD_ORDER)
-INT_KEYS = frozenset({"v", "t", "nc", "up", "cpu", "mem", "dsk", "tmp", "ag", "as"})
+INT_KEYS = frozenset({"v", "t", "nc", "up", "cpu", "mem", "dsk", "tmp", "ag", "as", "ar"})
 REQUIRED_KEYS = frozenset({"v", "t"})
 # Signed range per integer key: (minimum, maximum).
 INT_RANGES = {
@@ -49,6 +54,7 @@ INT_RANGES = {
     "tmp": (-40, 125),
     "ag": (0, 65535),
     "as": (-1, 2**31 - 1),
+    "ar": (0, 99),
 }
 
 _VALUE_CHARS = frozenset(
@@ -130,6 +136,10 @@ def _check_value(key: str, value: str) -> None:
             raise ProtocolError(f"field {key!r} interface name out of range: {value!r}")
         if not ip or len(ip) > NET_IPV4_MAX:
             raise ProtocolError(f"field {key!r} address out of range: {value!r}")
+    if key == "ws" and len(value) > WORKSPACE_MAX:
+        raise ProtocolError(f"field {key!r} workspace out of range: {value!r}")
+    if key == "pv" and len(value) > PROVIDER_MAX:
+        raise ProtocolError(f"field {key!r} provider out of range: {value!r}")
     if key == "h" and len(value) > HOST_MAX:
         raise ProtocolError(f"field {key!r} host name out of range: {value!r}")
 

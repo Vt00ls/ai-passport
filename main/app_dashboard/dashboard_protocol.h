@@ -18,6 +18,8 @@
 #define DASHBOARD_HOST_MAX 24
 #define DASHBOARD_IFACE_MAX 12
 #define DASHBOARD_IPV4_MAX 15
+#define DASHBOARD_WORKSPACE_MAX 20
+#define DASHBOARD_PROVIDER_MAX 8
 
 #define DASHBOARD_PROTOCOL_VERSION 1
 
@@ -40,11 +42,15 @@ typedef enum {
     DASHBOARD_FIELD_NET,
     DASHBOARD_FIELD_AGENTS,
     DASHBOARD_FIELD_AGENT_IDLE,
+    DASHBOARD_FIELD_AGENTS_RUNNING,
+    DASHBOARD_FIELD_WORKSPACE,
+    DASHBOARD_FIELD_PROVIDER,
     DASHBOARD_FIELD_COUNT,
 } dashboard_field_t;
 
 // Presence bit for `field`. An absent field means "no data", never zero.
-#define DASHBOARD_FIELD_BIT(field) ((uint16_t)(1u << (unsigned)(field)))
+// 32 bits so the field list can grow without silently truncating the mask.
+#define DASHBOARD_FIELD_BIT(field) ((uint32_t)1u << (unsigned)(field))
 
 enum {
     DASHBOARD_RANGE_TEMP_MIN = -40,
@@ -64,7 +70,7 @@ typedef enum {
 } dashboard_parse_t;
 
 typedef struct {
-    uint16_t present;    // dashboard_field_t bitmask of fields actually received
+    uint32_t present;    // dashboard_field_t bitmask of fields actually received
     uint16_t version;    // v
     uint32_t heartbeat;  // t: host wall-clock seconds at collection
     uint32_t uptime_s;   // up
@@ -80,6 +86,9 @@ typedef struct {
     char net_iface[DASHBOARD_IFACE_MAX + 1];
     char net_ip[DASHBOARD_IPV4_MAX + 1];
     bool net_up;
+    uint8_t agents_running;                        // ar: 0 means every agent is idle
+    char workspace[DASHBOARD_WORKSPACE_MAX + 1];   // ws: the running agent's workspace
+    char provider[DASHBOARD_PROVIDER_MAX + 1];     // pv: selects the logo
 } dashboard_status_t;
 
 // Reset to "nothing known": clears the presence mask and every value.

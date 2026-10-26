@@ -61,12 +61,19 @@ Rules:
 | `net` | str | `iface,state,ip`; `state` is `up` or `down`, `ip` is IPv4 or `-`. | `net=eno1,up,10.2.65.61` |
 | `ag` | int | Active agent sessions: sessions with activity in the last 300 s. | `ag=2` |
 | `as` | int | Seconds since the most recent agent activity; `-1` if never seen. | `as=5` |
+| `ar` | int | Agents currently running, 0–99. `0` means every agent is idle. | `ar=1` |
+| `ws` | str | Workspace of the most recently started running agent, ASCII, ≤ 20 chars. | `ws=feature-dashboard` |
+| `pv` | str | Provider id of that agent, ≤ 8 chars; selects the logo. | `pv=dsh` |
 
 The badge maps fields to pages:
 
 - Host health page: `up`, `ld`, `cpu`, `mem`, `dsk`, `tmp`.
 - Network page: `net`.
-- Agent status page: `ag`, `as`.
+- Agent page: `ar`, `ws`, `pv` when something is running; otherwise `as`.
+
+`ag`/`as` remain the fallback signal: they come from session file activity, which
+goes quiet during a long tool call. A producer that can query the agent supervisor
+should fill `ar`/`ws`/`pv`/`pm` instead, because that reports the agent's own state.
 - Heartbeat banner (all pages): age = badge monotonic clock − monotonic time of
   the last successfully received status. `t` is not compared against the badge
   clock.

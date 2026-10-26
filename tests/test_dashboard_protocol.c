@@ -102,7 +102,7 @@ static void test_full_frame_values(void)
 {
     const char *payload =
         "v=1;t=1782530000;h=dev-forge;nc=4;up=128099;ld=0.42;cpu=7;mem=38;dsk=33;"
-        "tmp=51;net=eno1,up,10.2.65.61;ag=2;as=5";
+        "tmp=51;net=eno1,up,10.2.65.61;ag=2;as=5;ar=2;ws=feature-dashboard;pv=dsh";
     dashboard_status_t status;
     CHECK(dashboard_status_parse(payload, strlen(payload), &status) == DASHBOARD_PARSE_OK);
 
@@ -121,11 +121,14 @@ static void test_full_frame_values(void)
     CHECK(status.net_up);
     CHECK(status.agents_active == 2);
     CHECK(status.agent_idle_s == 5);
+    CHECK(status.agents_running == 2);
+    CHECK(strcmp(status.workspace, "feature-dashboard") == 0);
+    CHECK(strcmp(status.provider, "dsh") == 0);
 
-    // All thirteen fields present.
-    uint16_t expected = 0;
+    // All sixteen fields present.
+    uint32_t expected = 0;
     for (int field = 0; field < DASHBOARD_FIELD_COUNT; field++) {
-        expected = (uint16_t)(expected | DASHBOARD_FIELD_BIT(field));
+        expected = expected | DASHBOARD_FIELD_BIT(field);
     }
     CHECK(status.present == expected);
 }

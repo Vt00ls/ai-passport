@@ -18,6 +18,7 @@
 #include "app_dashboard/dashboard_ble.h"
 #include "app_dashboard/dashboard_format.h"
 #include "app_dashboard/dashboard_health.h"
+#include "app_dashboard/dashboard_logos.h"
 #include "app_dashboard/dashboard_protocol.h"
 #include "app_dashboard/dashboard_state.h"
 #include "bsp_battery.h"
@@ -80,11 +81,27 @@ static lv_obj_t *s_detail_title;
 static lv_obj_t *s_detail_value[6];
 static lv_obj_t *s_detail_net;
 
-// AGENTS page
+// AGENTS page: one card that carries either the running agent or the idle state.
 static lv_obj_t *s_agents_title;
-static lv_obj_t *s_agents_active;
-static lv_obj_t *s_agents_last;
-static lv_obj_t *s_agents_hint;
+static lv_obj_t *s_agents_card;
+static lv_obj_t *s_agents_word;
+static lv_obj_t *s_agents_caption;
+static lv_obj_t *s_agents_value;
+static lv_obj_t *s_agents_logo;
+static lv_obj_t *s_agents_workspace;
+static lv_obj_t *s_agents_extra;
+
+// Page automation (design option C): jump to the agent page while an agent runs, but
+// never steal the page from someone who is reading it.
+#define AUTO_QUIET_MS 60000u       // no key press for this long before auto-switching
+#define AUTO_HOLD_MS 180000u       // a key press suppresses auto-switching this long
+#define AGENT_IDLE_RETURN_MS 30000u
+static uint64_t s_last_key_ms;
+static uint64_t s_auto_hold_until_ms;
+static bool s_auto_entered;        // the agent page was reached automatically
+static uint64_t s_agents_running_since_ms;
+static bool s_agents_were_running;
+static uint64_t s_agents_idle_since_ms;
 
 static dashboard_health_t s_health;
 static dashboard_verdict_t s_verdict_now;
@@ -112,6 +129,8 @@ static bool s_rendered_never;
 static uint32_t s_rendered_reboot_min;
 static bool s_rendered_reboot_valid;
 static uint64_t s_attention_since_ms;
+
+static void show_page(uint8_t page);
 
 static lv_obj_t *make_screen(void)
 {
@@ -278,20 +297,49 @@ static void build_agents_page(void)
     if (!screen) return;
 
     s_agents_title = make_label(screen, &lv_font_montserrat_20, COL_TEXT, 14, 40);
-    lv_label_set_text(s_agents_title, "AGENTS");
+    lv_label_set_text(s_agents_title, "AGENT");
 
-    lv_obj_t *caption = make_label(screen, &lv_font_montserrat_14, COL_MUTED, 14, 88);
-    lv_label_set_text(caption, "ACTIVE SESSIONS");
-    s_agents_active = make_label(screen, &lv_font_montserrat_48, COL_TEXT, 14, 106);
-    lv_label_set_text(s_agents_active, "--");
+    s_agents_card = make_plain(screen, 14, 72, 212, 104);
+    if (!s_agents_card) return;
+    lv_obj_set_style_radius(s_agents_card, 12, 0);
+    lv_obj_set_style_bg_color(s_agents_card, COL_CARD, 0);
+    lv_obj_set_style_bg_opa(s_agents_card, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(s_agents_card, 2, 0);
+    lv_obj_set_style_border_color(s_agents_card, COL_DIM, 0);
 
-    caption = make_label(screen, &lv_font_montserrat_14, COL_MUTED, 14, 176);
-    lv_label_set_text(caption, "LAST ACTIVITY");
-    s_agents_last = make_label(screen, &lv_font_montserrat_36, COL_TEXT, 14, 194);
-    lv_label_set_text(s_agents_last, "--");
+    s_agents_word = make_label(s_agents_card, &lv_font_montserrat_36, COL_TEXT, 0, 8);
+    lv_obj_set_width(s_agents_word, 212);
+    lv_obj_set_style_text_align(s_agents_word, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_text(s_agents_word, "IDLE");
 
-    s_agents_hint = make_label(screen, &lv_font_montserrat_14, COL_DIM, 14, 268);
-    lv_label_set_text(s_agents_hint, "");
+    s_agents_caption = make_label(s_agents_card, &lv_font_montserrat_14, COL_MUTED, 0, 46);
+    lv_obj_set_width(s_agents_caption, 212);
+    lv_obj_set_style_text_align(s_agents_caption, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_text(s_agents_caption, "");
+
+    s_agents_value = make_label(s_agents_card, &lv_font_montserrat_36, COL_TEXT, 0, 64);
+    lv_obj_set_width(s_agents_value, 212);
+    lv_obj_set_style_text_align(s_agents_value, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_text(s_agents_value, "--");
+
+    s_agents_logo = lv_image_create(screen);
+    if (s_agents_logo) {
+        lv_obj_set_pos(s_agents_logo, 14, 196);
+        lv_obj_add_flag(s_agents_logo, LV_OBJ_FLAG_HIDDEN);
+    }
+
+    // 14 px so a 20-character workspace still fits beside the logo: at 20 px the longest
+    // real name was clipped mid-word, which reads as a bug rather than as truncation.
+    s_agents_workspace = make_label(screen, &lv_font_montserrat_14, COL_TEXT, 52, 198);
+    // Workspace names can reach 20 characters. LV_LABEL_LONG_DOT wraps and then adds
+    // dots, which pushed the line below into the provider label, so clip to one line
+    // instead: predictable height, and the beginning of the name is what identifies it.
+    lv_obj_set_width(s_agents_workspace, 176);
+    lv_label_set_long_mode(s_agents_workspace, LV_LABEL_LONG_CLIP);
+    lv_label_set_text(s_agents_workspace, "");
+
+    s_agents_extra = make_label(screen, &lv_font_montserrat_14, COL_MUTED, 52, 216);
+    lv_label_set_text(s_agents_extra, "");
 }
 
 static lv_color_t severity_colour(dashboard_severity_t severity)
@@ -635,27 +683,78 @@ static void render_detail_page(const dashboard_snapshot_t *snapshot, bool show_v
     }
 }
 
-static void render_agents_page(const dashboard_snapshot_t *snapshot, bool show_values)
+static void render_agents_page(const dashboard_snapshot_t *snapshot, bool show_values,
+                               uint64_t now_ms)
 {
     const dashboard_status_t *status = &snapshot->status;
-    char buffer[24];
+    char buffer[32];
 
-    if (show_values && dashboard_status_has(status, DASHBOARD_FIELD_AGENTS)) {
-        snprintf(buffer, sizeof(buffer), "%u", (unsigned)status->agents_active);
-        set_text(s_agents_active, buffer, COL_TEXT);
-    } else {
-        set_text(s_agents_active, "--", COL_DIM);
+    // `ar` present means the agent supervisor answered; absent means fall back to the
+    // session-derived signal, which cannot say whether anything is running.
+    const bool supervisor = dashboard_status_has(status, DASHBOARD_FIELD_AGENTS_RUNNING);
+    const bool running = show_values && supervisor && status->agents_running > 0;
+
+    if (running) {
+        uint64_t since = s_agents_running_since_ms;
+        if (!s_agents_were_running || since == 0) {
+            since = now_ms;
+            s_agents_running_since_ms = now_ms;
+        }
+        const uint32_t elapsed_s = (uint32_t)((now_ms - since) / 1000u);
+
+        lv_obj_set_style_border_color(s_agents_card, COL_OK, 0);
+        set_text(s_agents_word, "WORKING", COL_OK);
+        set_text(s_agents_caption, "ELAPSED", COL_MUTED);
+        dashboard_format_age(buffer, sizeof(buffer), elapsed_s, false);
+        set_text(s_agents_value, buffer, COL_TEXT);
+        s_agents_were_running = true;
+
+        // The logo identifies who is working; an unknown provider shows nothing rather
+        // than a wrong mark.
+        const lv_image_dsc_t *logo = dashboard_provider_logo(status->provider);
+        if (s_agents_logo) {
+            if (logo) {
+                lv_image_set_src(s_agents_logo, logo);
+                lv_obj_remove_flag(s_agents_logo, LV_OBJ_FLAG_HIDDEN);
+            } else {
+                lv_obj_add_flag(s_agents_logo, LV_OBJ_FLAG_HIDDEN);
+            }
+        }
+        lv_obj_set_pos(s_agents_workspace, logo ? 52 : 14, 198);
+        lv_obj_set_pos(s_agents_extra, logo ? 52 : 14, 216);
+
+        set_text(s_agents_workspace,
+                 dashboard_status_has(status, DASHBOARD_FIELD_WORKSPACE) ? status->workspace
+                                                                         : "--",
+                 COL_TEXT);
+        if (status->agents_running > 1) {
+            snprintf(buffer, sizeof(buffer), "%u agents running", (unsigned)status->agents_running);
+            set_text(s_agents_extra, buffer, COL_MUTED);
+        } else {
+            set_text(s_agents_extra, dashboard_status_has(status, DASHBOARD_FIELD_PROVIDER)
+                                         ? status->provider
+                                         : "",
+                     COL_DIM);
+        }
+        return;
     }
 
+    // Idle: a quiet card and, when known, how long it has been quiet.
+    s_agents_were_running = false;
+    s_agents_running_since_ms = 0;
+    lv_obj_set_style_border_color(s_agents_card, COL_DIM, 0);
+    set_text(s_agents_word, "IDLE", COL_MUTED);
+    set_text(s_agents_caption, "LAST ACTIVITY", COL_MUTED);
     if (show_values && dashboard_status_has(status, DASHBOARD_FIELD_AGENT_IDLE) &&
         status->agent_idle_s >= 0) {
         dashboard_format_age(buffer, sizeof(buffer), (uint32_t)status->agent_idle_s, false);
-        set_text(s_agents_last, buffer, COL_TEXT);
+        set_text(s_agents_value, buffer, COL_TEXT);
     } else {
-        set_text(s_agents_last, "--", COL_DIM);
+        set_text(s_agents_value, "--", COL_DIM);
     }
-
-    set_text(s_agents_hint, show_values ? "" : "waiting for host", COL_DIM);
+    if (s_agents_logo) lv_obj_add_flag(s_agents_logo, LV_OBJ_FLAG_HIDDEN);
+    set_text(s_agents_workspace, supervisor ? "" : "no supervisor", COL_DIM);
+    set_text(s_agents_extra, "", COL_DIM);
 }
 
 static void apply_backlight(const dashboard_verdict_t *verdict, uint64_t now_ms)
@@ -753,7 +852,7 @@ static void refresh_timer_cb(lv_timer_t *timer)
                            state_colour, show_values, true, reboot_recent, reboot_age_s,
                            dashboard_health_link_down_s(&s_health, now_ms), battery_percent);
         render_detail_page(&snapshot, show_values);
-        render_agents_page(&snapshot, show_values);
+        render_agents_page(&snapshot, show_values, now_ms);
         paint_beats(show_values ? state_colour : COL_IDLE);
         s_rendered_frames = snapshot.accepted_frames;
         s_rendered_connected = snapshot.connected;
@@ -780,6 +879,36 @@ static void refresh_timer_cb(lv_timer_t *timer)
         paint_beats(show_values ? state_colour : COL_IDLE);
         s_rendered_age_s = ticking_s;
         s_rendered_never = age.never_received;
+    }
+
+    // --- page automation (design option C) ---------------------------------
+    // Never steal the page from someone reading it, never hide a CRIT, and always come
+    // back on its own once the agent finishes.
+    const bool agent_running =
+        snapshot.have_rx && dashboard_status_has(&snapshot.status, DASHBOARD_FIELD_AGENTS_RUNNING) &&
+        snapshot.status.agents_running > 0;
+
+    if (s_verdict_now.severity == DASHBOARD_SEVERITY_CRIT) {
+        // An alert outranks the agent view; the person needs to see the problem.
+        if (s_page != PAGE_STATUS) {
+            show_page(PAGE_STATUS);
+            s_auto_entered = false;
+        }
+        s_agents_idle_since_ms = 0;
+    } else if (agent_running) {
+        s_agents_idle_since_ms = 0;
+        const bool quiet = (now_ms - s_last_key_ms) > AUTO_QUIET_MS;
+        const bool allowed = now_ms >= s_auto_hold_until_ms;
+        if (s_page == PAGE_STATUS && quiet && allowed) {
+            show_page(PAGE_AGENTS);
+            s_auto_entered = true;
+        }
+    } else if (s_page == PAGE_AGENTS && s_auto_entered) {
+        if (s_agents_idle_since_ms == 0) s_agents_idle_since_ms = now_ms;
+        if (now_ms - s_agents_idle_since_ms >= AGENT_IDLE_RETURN_MS) {
+            show_page(PAGE_STATUS);
+            s_auto_entered = false;
+        }
     }
 
     apply_backlight(&s_verdict_now, now_ms);
@@ -845,7 +974,11 @@ void dashboard_ui_stop(void)
     }
     for (int i = 0; i < 6; i++) s_detail_value[i] = NULL;
     s_detail_title = s_detail_net = NULL;
-    s_agents_title = s_agents_active = s_agents_last = s_agents_hint = NULL;
+    s_agents_title = s_agents_card = s_agents_word = NULL;
+    s_agents_caption = s_agents_value = s_agents_logo = NULL;
+    s_agents_workspace = s_agents_extra = NULL;
+    s_auto_entered = false;
+    s_agents_were_running = false;
     s_rendered_valid = false;
     s_beat_started = false;
     s_started = false;
@@ -854,6 +987,15 @@ void dashboard_ui_stop(void)
 void dashboard_ui_key(bsp_btn_t btn, bsp_btn_ev_t ev)
 {
     if (!s_started) return;
+
+    // A key press means the user is driving: pause auto-switching, and stop calling the
+    // agent page "automatic" so it is not yanked away from them later.
+    const uint64_t now_ms = dashboard_state_now_ms();
+    s_last_key_ms = now_ms;
+    if (ev == BSP_BTN_CLICK || ev == BSP_BTN_LONG) {
+        s_auto_hold_until_ms = now_ms + AUTO_HOLD_MS;
+        s_auto_entered = false;
+    }
 
     if (btn == BSP_BTN_UP && ev == BSP_BTN_CLICK) {
         show_page((uint8_t)((s_page + PAGE_COUNT - 1) % PAGE_COUNT));

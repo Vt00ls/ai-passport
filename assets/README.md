@@ -28,6 +28,14 @@ Store reusable source images and generated display assets in `images/`.
 | [`images/logo-wordmark.png`](images/logo-wordmark.png) | 1648 × 336, PNG RGBA | Transparent black wordmark extracted from the repository's original `images/logo.png`; embedded in both project README files for light backgrounds. |
 | [`images/logo-wordmark-dark.png`](images/logo-wordmark-dark.png) | 1648 × 336, PNG RGBA | White version of the extracted wordmark, used by the README `<picture>` element when GitHub is in dark mode. |
 
+| [`images/agent-pi-logo.svg`](images/agent-pi-logo.svg) | 800 × 800, SVG | Provider mark for the `pi` agent, shown on the dashboard's agent page. Source: `earendil-works/pi-website`, `src/logo.svg`, MIT. Converted with `tools/convert_logo.py` into `main/app_dashboard/dashboard_logos_pi.c` as a 32 × 32 RGB565A8 descriptor (3,072 bytes of pixel data). |
+| [`images/agent-dsh-logo.svg`](images/agent-dsh-logo.svg) | 1104 × 1104, SVG | Provider mark for the `dsh` agent. Source: `deepseek-ai/deepseek-harness`, `apps/desktop/resources/icon.svg`, MIT. Converted the same way into `main/app_dashboard/dashboard_logos_dsh.c`. |
+
+Both logo files are reproduced only to identify which agent is running, which is a
+nominative use; the MIT licence covers the source repositories, not the trademarks
+themselves. Re-run `python3 tools/convert_logo.py <svg> --name <identifier> --output
+main/app_dashboard/<file>.c` after changing either image.
+
 - Use descriptive names and document dimensions, pixel format, conversion steps, and destination.
 - Prefer formats suitable for the 240 × 320 RGB565 display and account for Flash and internal RAM.
 - Preserve editable sources where licensing permits, and record the source and license.
