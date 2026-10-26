@@ -410,8 +410,16 @@ static void render_status_page(const dashboard_snapshot_t *snapshot, const dashb
                                uint32_t reboot_age_s, uint32_t link_down_s,
                                int battery_percent)
 {
-    bool critical_panel = false;
-    const char *word = verdict_word(verdict->alert, &critical_panel);
+    bool breach = false;
+    const char *word = verdict_word(verdict->alert, &breach);
+    // A WARN is a hint, not a takeover: the card keeps showing state, and the amber
+    // indicator row already names the item that is close to its threshold.
+    const bool critical_panel = breach && verdict->severity == DASHBOARD_SEVERITY_CRIT;
+    if (!critical_panel) {
+        if (verdict->severity == DASHBOARD_SEVERITY_WARN && breach) {
+            word = "WARN";
+        }
+    }
 
     if (!values_changed) return;
 
