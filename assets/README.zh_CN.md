@@ -25,6 +25,12 @@
 | [`images/readme-hardware-specs.png`](images/readme-hardware-specs.png) | 2172 × 724，PNG RGBA | 保留为可选技术参考图，不再用于首页主视觉。于 2026-09-17 使用内置图像生成工具为本仓库生成；已根据文档中的硬件能力契约核对图中的六项标签与参数。 |
 | [`images/logo-wordmark.png`](images/logo-wordmark.png) | 1648 × 336，PNG RGBA | 从仓库原始 `images/logo.png` 中精确裁切并去除背景的黑色字标；用于中英文项目 README 的浅色主题。 |
 | [`images/logo-wordmark-dark.png`](images/logo-wordmark-dark.png) | 1648 × 336，PNG RGBA | 提取字标的白色版本；README 使用 `<picture>` 在 GitHub 深色主题下显示。 |
+| [`images/agent-pi-logo.svg`](images/agent-pi-logo.svg) | 800 × 800，SVG | `pi` agent 的提供方标识，用于仪表盘的 agent 页面。来源：`earendil-works/pi-website` 的 `src/logo.svg`，MIT。由 `tools/convert_logo.py` 转成 `main/app_dashboard/dashboard_logos_pi.c`，32 × 32 RGB565A8（3,072 字节像素数据）。 |
+| [`images/agent-dsh-logo.svg`](images/agent-dsh-logo.svg) | 1104 × 1104，SVG | `dsh` agent 的提供方标识。来源：`deepseek-ai/deepseek-harness` 的 `apps/desktop/resources/icon.svg`，MIT。同样方式转成 `main/app_dashboard/dashboard_logos_dsh.c`。 |
+
+这两个 logo 仅用于标识"当前运行的是哪个 agent"，属于指名性使用；MIT 覆盖的是源仓库代码，
+不覆盖商标本身。修改图片后重新执行 `python3 tools/convert_logo.py <svg> --name <标识符>
+--output main/app_dashboard/<文件>.c`。
 
 - 使用描述性命名，并记录尺寸、像素格式、转换步骤与目标路径。
 - 优先采用适合 240 × 320 RGB565 显示的格式，并纳入 Flash 与内部 RAM 考量。

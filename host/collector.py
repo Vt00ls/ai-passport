@@ -20,8 +20,11 @@ from __future__ import annotations
 
 import argparse
 import fcntl
+import glob
 import json
 import os
+import shutil
+import subprocess
 import socket
 import struct
 import sys
@@ -50,6 +53,10 @@ class Sources:
     sys_net: str = "/sys/class/net"
     thermal_glob: str = "/sys/class/thermal/thermal_zone*/temp"
     sessions_dir: str = os.path.join(os.path.expanduser("~"), ".pi", "agent", "sessions")
+    # Absolute path to the paseo CLI. systemd units get a minimal PATH, so relying on
+    # `paseo` being discoverable is not enough; an empty value falls back to PATH.
+    paseo_bin: str = ""
+    paseo_timeout: float = 5.0
     active_window: float = 300.0
     cpu_interval: float = 0.2
     statvfs_path: str = "/"
@@ -330,6 +337,104 @@ def _last_activity_time(path: Path) -> float | None:
     return latest
 
 
+# paseo is queried at most this often per process; the pusher calls collect() every
+# few seconds and a node CLI start-up costs a few hundred milliseconds.
+_PASEO_CACHE: dict[str, object] = {"at": 0.0, "value": None}
+
+
+def _find_paseo() -> str | None:
+    """Locate the paseo CLI without requiring configuration.
+
+    A systemd unit gets a minimal PATH, so `paseo` installed under the user's home is
+    invisible to `shutil.which`. The usual per-user install locations are searched
+    before giving up, which keeps the service working with no machine-specific edit.
+    """
+    found = shutil.which("paseo")
+    if found:
+        return found
+    patterns = (
+        os.path.expanduser("~/.local/opt/node-*/bin/paseo"),
+        os.path.expanduser("~/.local/bin/paseo"),
+        os.path.expanduser("~/.nvm/versions/node/*/bin/paseo"),
+    )
+    for pattern in patterns:
+        matches = sorted(glob.glob(pattern))
+        if matches:
+            return matches[-1]
+    return None
+
+
+def _sanitize_label(text: str, limit: int) -> str:
+    """Keep the protocol's value charset, cap the length, and mark any truncation.
+
+    A shortened workspace name is otherwise indistinguishable from a typo, and real
+    names do hit the cap: chore-dsh-devboard-mcp is 23 characters against a limit of 20.
+    """
+    kept = "".join(ch for ch in text if ch.isalnum() or ch in "._/-~")
+    if not kept:
+        return "-"
+    if len(kept) > limit:
+        return kept[: limit - 1] + "~"
+    return kept
+
+
+def read_paseo_agents(paseo_bin: str, timeout: float, now: float,
+                      cache_ttl: float = 10.0) -> tuple[int, str, str] | None:
+    """Ask the agent supervisor which agents are running.
+
+    Returns (running_count, workspace, provider), or None when paseo cannot answer --
+    in that case the frame simply omits `ar`, and the badge falls back to the
+    session-derived `ag`/`as`.
+
+    The agent's own status is used because session files only change between steps: a
+    three-minute build looks idle on disk exactly when the panel matters most.
+    """
+    cached_at = float(_PASEO_CACHE.get("at") or 0.0)
+    if now - cached_at < cache_ttl and _PASEO_CACHE.get("value") is not None:
+        return _PASEO_CACHE["value"]  # type: ignore[return-value]
+
+    binary = paseo_bin or _find_paseo()
+    if not binary:
+        return None
+    # paseo starts with `#!/usr/bin/env -S node ...`, so the interpreter has to be
+    # reachable. Its own directory holds `node`, which is exactly what a systemd unit's
+    # minimal PATH lacks.
+    environment = dict(os.environ)
+    binary_dir = os.path.dirname(os.path.abspath(binary))
+    environment["PATH"] = binary_dir + os.pathsep + environment.get(
+        "PATH", "/usr/local/bin:/usr/bin:/bin"
+    )
+    try:
+        result = subprocess.run(
+            [binary, "ls", "--json"],
+            capture_output=True, text=True, timeout=timeout, env=environment,
+        )
+        if result.returncode != 0:
+            return None
+        agents = json.loads(result.stdout or "[]")
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
+        return None
+    if not isinstance(agents, list):
+        return None
+
+    running = [a for a in agents if isinstance(a, dict) and str(a.get("status")) == "running"]
+    workspace = "-"
+    provider = "-"
+    if running:
+        # paseo lists the most recently created agent first; taking the first running
+        # entry keeps the label on the agent the user just started.
+        leader = running[0]
+        cwd = str(leader.get("cwd") or "")
+        workspace = _sanitize_label(os.path.basename(cwd.rstrip("/")), 20)
+        # provider looks like 'dsh/["baizhi","deepseek-flash"]'; only the id is useful.
+        provider = _sanitize_label(str(leader.get("provider") or "").split("/")[0], 8)
+
+    value = (len(running), workspace, provider)
+    _PASEO_CACHE["at"] = now
+    _PASEO_CACHE["value"] = value
+    return value
+
+
 def read_agent_state(sessions_dir: str, now: float, active_window: float = 300.0) -> tuple[int, int]:
     """Return ``(active_count, seconds_since_last_activity)``.
 
@@ -437,12 +542,23 @@ def collect(sources: Sources | None = None) -> str:
         fields["ag"] = active
         fields["as"] = last_age
 
+    # The supervisor's view is authoritative when it answers; an absent `ar` tells the
+    # badge to fall back to `ag`/`as` instead of assuming "no agents".
+    agents = read_paseo_agents(src.paseo_bin, src.paseo_timeout, now)
+    if agents is not None:
+        running, workspace, provider = agents
+        fields["ar"] = running
+        if running:
+            fields["ws"] = workspace
+            fields["pv"] = provider
+
     return _fit(fields)
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--sessions-dir", default=None, help="agent session jsonl directory (default: ~/.pi/agent/sessions)")
+    parser.add_argument("--paseo-bin", default=None, help="absolute path to the paseo CLI (default: found on PATH)")
     parser.add_argument("--active-window", type=float, default=300.0, help="seconds an agent counts as active (default: 300)")
     parser.add_argument("--cpu-interval", type=float, default=0.2, help="seconds between CPU samples (default: 0.2)")
     parser.add_argument("--json", action="store_true", help="emit a JSON object instead of the raw status string")
@@ -454,6 +570,8 @@ def main(argv: list[str] | None = None) -> int:
     sources = Sources(active_window=args.active_window, cpu_interval=args.cpu_interval)
     if args.sessions_dir:
         sources.sessions_dir = args.sessions_dir
+    if args.paseo_bin:
+        sources.paseo_bin = args.paseo_bin
     payload = collect(sources)
     if args.json:
         import protocol

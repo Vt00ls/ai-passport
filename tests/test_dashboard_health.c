@@ -35,7 +35,6 @@ static dashboard_snapshot_t healthy(uint32_t uptime_s)
     dashboard_snapshot_t snapshot;
     memset(&snapshot, 0, sizeof(snapshot));
     dashboard_status_reset(&snapshot.status);
-    snapshot.status.present = 0xFFFF & ~0;  // all bits, adjusted below
     snapshot.status.present = 0;
     snapshot.status.present |= DASHBOARD_FIELD_BIT(DASHBOARD_FIELD_VERSION);
     snapshot.status.present |= DASHBOARD_FIELD_BIT(DASHBOARD_FIELD_TIME);
@@ -229,7 +228,7 @@ static void test_load_is_judged_against_cores(void)
     dashboard_snapshot_t blind_snapshot = healthy(1000);
     blind_snapshot.last_rx_ms = 0;
     blind_snapshot.status.load_x100 = 3000;
-    blind_snapshot.status.present &= (uint16_t)~DASHBOARD_FIELD_BIT(DASHBOARD_FIELD_CORES);
+    blind_snapshot.status.present &= ~DASHBOARD_FIELD_BIT(DASHBOARD_FIELD_CORES);
     v = dashboard_health_update(&blind, &blind_snapshot, 0);
     CHECK_EQ(v.alert, DASHBOARD_ALERT_NONE);
 }
@@ -258,7 +257,7 @@ static void test_missing_field_never_alerts(void)
     dashboard_health_init(&health, NULL);
     dashboard_snapshot_t snapshot = healthy(1000);
     snapshot.last_rx_ms = 0;
-    snapshot.status.present &= (uint16_t)~DASHBOARD_FIELD_BIT(DASHBOARD_FIELD_DISK);
+    snapshot.status.present &= ~DASHBOARD_FIELD_BIT(DASHBOARD_FIELD_DISK);
     snapshot.status.disk_percent = 99;  // value present but field marked absent
     const dashboard_verdict_t v = dashboard_health_update(&health, &snapshot, 0);
     CHECK_EQ(v.alert, DASHBOARD_ALERT_NONE);

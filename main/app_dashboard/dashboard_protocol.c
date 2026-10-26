@@ -27,11 +27,14 @@ static const field_entry_t s_fields[] = {
     { "net", 3, DASHBOARD_FIELD_NET },
     { "ag", 2, DASHBOARD_FIELD_AGENTS },
     { "as", 2, DASHBOARD_FIELD_AGENT_IDLE },
+    { "ar", 2, DASHBOARD_FIELD_AGENTS_RUNNING },
+    { "ws", 2, DASHBOARD_FIELD_WORKSPACE },
+    { "pv", 2, DASHBOARD_FIELD_PROVIDER },
 };
 
 #define FIELD_COUNT ((size_t)(sizeof(s_fields) / sizeof(s_fields[0])))
 
-_Static_assert(DASHBOARD_FIELD_COUNT == 13,
+_Static_assert(DASHBOARD_FIELD_COUNT == 16,
                "presence mask is 16 bits; keep the field list and the enum in sync");
 
 // ---------------------------------------------------------------------------
@@ -48,6 +51,7 @@ static bool is_value_char(char c, bool allow_comma)
     case '_':
     case '/':
     case '-':
+    case '~':  // truncation marker: a shortened label says so instead of looking wrong
         return true;
     case ',':
         return allow_comma;
@@ -240,6 +244,14 @@ static bool parse_field(dashboard_status_t *status, dashboard_field_t field,
         if (signed_value < -1) return false;
         status->agent_idle_s = signed_value;
         return true;
+    case DASHBOARD_FIELD_AGENTS_RUNNING:
+        if (!parse_u32(value, length, &unsigned_value) || unsigned_value > 99u) return false;
+        status->agents_running = (uint8_t)unsigned_value;
+        return true;
+    case DASHBOARD_FIELD_WORKSPACE:
+        return copy_bounded(status->workspace, sizeof(status->workspace), value, length);
+    case DASHBOARD_FIELD_PROVIDER:
+        return copy_bounded(status->provider, sizeof(status->provider), value, length);
     case DASHBOARD_FIELD_COUNT:
     default:
         return false;
@@ -300,7 +312,7 @@ dashboard_parse_t dashboard_status_parse(const char *text, size_t length,
         }
         if (!entry) return DASHBOARD_PARSE_UNKNOWN_FIELD;
 
-        const uint16_t bit = DASHBOARD_FIELD_BIT(entry->field);
+        const uint32_t bit = DASHBOARD_FIELD_BIT(entry->field);
         if (parsed.present & bit) return DASHBOARD_PARSE_DUPLICATE_FIELD;
         if (!parse_field(&parsed, entry->field, value, value_length)) {
             return DASHBOARD_PARSE_BAD_VALUE;

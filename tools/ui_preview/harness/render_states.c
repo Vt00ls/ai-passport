@@ -127,6 +127,9 @@ static void set_healthy_frame(uint32_t disk, uint32_t mem)
     snprintf(s->net_ip, sizeof(s->net_ip), "10.2.65.61");
     s->agents_active = 2;
     s->agent_idle_s = 5;
+    s->agents_running = 0;
+    snprintf(s->workspace, sizeof(s->workspace), "feature-dashboard");
+    snprintf(s->provider, sizeof(s->provider), "pi");
     s_snapshot.have_rx = true;
     s_snapshot.connected = true;
     s_snapshot.accepted_frames++;
@@ -227,6 +230,36 @@ int main(void)
     s_battery = 18;
     pump(3, true);
     write_bmp("live-9-battery-charging.bmp");
+
+    // An agent starts running. No key has been pressed for a long time, so the page
+    // automation should switch to the agent view on its own (design option C).
+    set_healthy_frame(33, 38);
+    s_snapshot.status.agents_running = 1;
+    s_snapshot.status.present |= DASHBOARD_FIELD_BIT(DASHBOARD_FIELD_AGENTS_RUNNING);
+    s_snapshot.status.present |= DASHBOARD_FIELD_BIT(DASHBOARD_FIELD_WORKSPACE);
+    s_snapshot.status.present |= DASHBOARD_FIELD_BIT(DASHBOARD_FIELD_PROVIDER);
+    snprintf(s_snapshot.status.workspace, sizeof(s_snapshot.status.workspace), "feature-dashboard");
+    snprintf(s_snapshot.status.provider, sizeof(s_snapshot.status.provider), "pi");
+    pump(20, true);
+    write_bmp("live-10-agent-running-pi.bmp");
+
+    // The other provider, with two agents running.
+    snprintf(s_snapshot.status.provider, sizeof(s_snapshot.status.provider), "dsh");
+    s_snapshot.status.agents_running = 2;
+    snprintf(s_snapshot.status.workspace, sizeof(s_snapshot.status.workspace), "lethal-unicorn");
+    pump(4, true);
+    write_bmp("live-11-agent-running-dsh-two.bmp");
+
+    // Both finish: after the 30 s idle window the panel returns to STATUS by itself.
+    s_snapshot.status.agents_running = 0;
+    s_snapshot.status.agent_idle_s = 95;
+    pump(35, true);
+    write_bmp("live-12-auto-returned-to-status.bmp");
+
+    // Navigate back to the agent page by hand to see its idle form.
+    press(BSP_BTN_DOWN);
+    press(BSP_BTN_DOWN);
+    write_bmp("live-13-agent-idle.bmp");
 
     printf("backlight at exit: %d\n", s_backlight);
     dashboard_ui_stop();

@@ -170,7 +170,43 @@ run of empty slots, which is the same failure that motivated the project.
 Page 2 — DETAIL: uptime, load with the core count (`0.42 / 4`), CPU, memory, disk,
 temperature, and the network line (`eno1 up 10.2.65.61`).
 
-Page 3 — AGENTS: active session count and time since the last agent activity.
+### Page 3 — AGENT
+
+This page has two forms, because "is an agent working for me right now?" is the
+question a desk panel should answer without a key press.
+
+Running, when the frame carries `ar` > 0:
+
+```text
+ Ubuntu-Box-Dev    87%
+ AGENT
+ +----------------------+
+ |       WORKING        |  green border, state colour
+ |       ELAPSED        |
+ |        12m 34s       |
+ +----------------------+
+ [logo]  feat[...]        provider logo, workspace, provider or agent count
+```
+
+Idle: the same card goes quiet — `IDLE` over `LAST ACTIVITY` and the age — and no
+logo is drawn. The active-session count was dropped here: it answered a question
+nobody asks at a glance.
+
+The elapsed time is measured by the badge from the moment `ar` first became non-zero,
+so it needs no clock in the frame and survives a lost connection without lying.
+
+### Page automation
+
+An agent that starts working should make the page come to the reader, but the panel
+must not fight the reader either:
+
+| Rule | Value | Why |
+| --- | --- | --- |
+| Auto-switch only from STATUS | — | someone already reading DETAIL keeps it |
+| Only after a quiet period | 60 s without a key | a panel that jumps while you read is hostile |
+| A key press pauses automation | 3 min | you are driving; the panel follows |
+| Return to STATUS after the agent finishes | 30 s idle | the panel settles back by itself |
+| A CRIT alert always wins | immediate | a host problem outranks any agent view |
 
 Every value that is absent from the last payload renders `--`, never `0`, so a
 missing field cannot be mistaken for a real measurement.

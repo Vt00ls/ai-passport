@@ -20,6 +20,9 @@ ok|v=1;t=1782530000;tmp=-5
 ok|v=1;t=1782530000;as=-1
 ok|v=1;t=1782530000;net=wlan0,down,-
 ok|v=1;t=1782530000;h=Ubuntu-Box-Dev
+ok|v=1;t=1782530000;ar=1;ws=feature-dashboard;pv=dsh
+ok|v=1;t=1782530000;ar=1;ws=chore-dsh-devboard-~;pv=pi
+ok|v=1;t=1782530000;ar=0
 ok|v=1;t=1782530000;nc=1
 ok|v=1;t=1782530000;nc=1024
 ok|v=1;t=0
@@ -61,6 +64,9 @@ err|overflow-uint32|v=1;t=4294967296
 err|cores-zero|v=1;t=5;nc=0
 err|cores-out-of-range|v=1;t=5;nc=1025
 err|cores-not-integer|v=1;t=5;nc=x
+err|agents-running-out-of-range|v=1;t=5;ar=100
+err|workspace-too-long|v=1;t=5;ws=aaaaaaaaaaaaaaaaaaaaa
+err|provider-too-long|v=1;t=5;pv=aaaaaaaaa
 err|net-missing-component|v=1;t=5;net=eno1,up
 err|net-extra-component|v=1;t=5;net=eno1,up,10.0.0.1,x
 err|net-bad-state|v=1;t=5;net=eno1,maybe,10.0.0.1
