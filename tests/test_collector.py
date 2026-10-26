@@ -93,6 +93,23 @@ class FileReaderTest(unittest.TestCase):
         self.assertEqual(collector._iface_state(str(sys_net), "eno1"), "up")
 
 
+class HostnameTest(unittest.TestCase):
+    def test_fqdn_is_reduced_to_the_first_label(self) -> None:
+        # This is the exact name macOS reported, and the badge rejects it verbatim.
+        self.assertEqual(
+            collector.short_hostname("VTdeMacBook-Pro.unknown.host.in.chaitin.net"),
+            "VTdeMacBook-Pro",
+        )
+
+    def test_short_name_is_kept(self) -> None:
+        self.assertEqual(collector.short_hostname("Ubuntu-Box-Dev"), "Ubuntu-Box-Dev")
+
+    def test_over_long_label_is_capped(self) -> None:
+        name = collector.short_hostname("a" * 60)
+        self.assertEqual(len(name), protocol_mod.HOST_MAX)
+        self.assertTrue(name)
+
+
 class TimestampAndAgentTest(unittest.TestCase):
     def test_parse_timestamp_variants(self) -> None:
         self.assertAlmostEqual(collector._parse_timestamp(1782530000), 1782530000)
