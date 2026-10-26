@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import fcntl
+import glob
 import json
 import os
 import shutil
@@ -341,6 +342,28 @@ def _last_activity_time(path: Path) -> float | None:
 _PASEO_CACHE: dict[str, object] = {"at": 0.0, "value": None}
 
 
+def _find_paseo() -> str | None:
+    """Locate the paseo CLI without requiring configuration.
+
+    A systemd unit gets a minimal PATH, so `paseo` installed under the user's home is
+    invisible to `shutil.which`. The usual per-user install locations are searched
+    before giving up, which keeps the service working with no machine-specific edit.
+    """
+    found = shutil.which("paseo")
+    if found:
+        return found
+    patterns = (
+        os.path.expanduser("~/.local/opt/node-*/bin/paseo"),
+        os.path.expanduser("~/.local/bin/paseo"),
+        os.path.expanduser("~/.nvm/versions/node/*/bin/paseo"),
+    )
+    for pattern in patterns:
+        matches = sorted(glob.glob(pattern))
+        if matches:
+            return matches[-1]
+    return None
+
+
 def _sanitize_label(text: str, limit: int) -> str:
     """Keep the protocol's value charset and cap the length."""
     kept = "".join(ch for ch in text if ch.isalnum() or ch in "._-/")
@@ -362,13 +385,21 @@ def read_paseo_agents(paseo_bin: str, timeout: float, now: float,
     if now - cached_at < cache_ttl and _PASEO_CACHE.get("value") is not None:
         return _PASEO_CACHE["value"]  # type: ignore[return-value]
 
-    binary = paseo_bin or shutil.which("paseo")
+    binary = paseo_bin or _find_paseo()
     if not binary:
         return None
+    # paseo starts with `#!/usr/bin/env -S node ...`, so the interpreter has to be
+    # reachable. Its own directory holds `node`, which is exactly what a systemd unit's
+    # minimal PATH lacks.
+    environment = dict(os.environ)
+    binary_dir = os.path.dirname(os.path.abspath(binary))
+    environment["PATH"] = binary_dir + os.pathsep + environment.get(
+        "PATH", "/usr/local/bin:/usr/bin:/bin"
+    )
     try:
         result = subprocess.run(
             [binary, "ls", "--json"],
-            capture_output=True, text=True, timeout=timeout,
+            capture_output=True, text=True, timeout=timeout, env=environment,
         )
         if result.returncode != 0:
             return None
